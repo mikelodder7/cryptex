@@ -17,6 +17,7 @@
 use secret_service::{EncryptionType, SecretService};
 
 use crate::base::Result;
+use crate::error::KeyRingError;
 use crate::keyring::get_username;
 use crate::parse_peek_criteria;
 use crate::KeyRing;
