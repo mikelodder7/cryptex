@@ -34,6 +34,8 @@ extern crate secret_service;
 extern crate security_framework;
 #[cfg(target_os = "macos")]
 extern crate security_framework_sys;
+#[cfg(feature = "serde")]
+extern crate serde;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 extern crate users;
 #[cfg(target_os = "windows")]
@@ -192,7 +194,7 @@ impl ::std::fmt::Debug for KeyRingSecret {
     }
 }
 
-#[cfg(feature = "serialization")]
+#[cfg(feature = "serde")]
 impl serde::ser::Serialize for KeyRingSecret {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -202,7 +204,7 @@ impl serde::ser::Serialize for KeyRingSecret {
     }
 }
 
-#[cfg(feature = "serialization")]
+#[cfg(feature = "serde")]
 impl<'a> serde::de::Deserialize<'a> for KeyRingSecret {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where

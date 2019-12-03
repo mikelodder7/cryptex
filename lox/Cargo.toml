@@ -9,7 +9,6 @@ crate-type = ["staticlib", "rlib", "cdylib"]
 
 [features]
 default = []
-serialization = ["serde"]
 
 [dependencies]
 failure = "0.1"
