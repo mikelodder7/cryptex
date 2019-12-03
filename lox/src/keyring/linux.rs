@@ -32,15 +32,16 @@ pub struct LinuxOsKeyRing {
 }
 
 impl KeyRing for LinuxOsKeyRing {
-    fn new(service: &str) -> Result<Self> {
+    fn new<S: AsRef<str>>(service: S) -> Result<Self> {
         Ok(LinuxOsKeyRing {
             keychain: SecretService::new(EncryptionType::Dh).map_err(|e| KeyRingError::from(e))?,
-            service: service.to_string(),
+            service: service.as_ref().to_string(),
             username: get_username(),
         })
     }
 
-    fn get_secret(&mut self, id: &str) -> Result<KeyRingSecret> {
+    fn get_secret<S: AsRef<str>>(&mut self, id: S) -> Result<KeyRingSecret> {
+        let id = id.as_ref();
         let collection = self
             .keychain
             .get_default_collection()
@@ -90,7 +91,8 @@ impl KeyRing for LinuxOsKeyRing {
         Ok(out)
     }
 
-    fn peek_secret(id: &str) -> Result<Vec<(String, KeyRingSecret)>> {
+    fn peek_secret<S: AsRef<str>>(id: S) -> Result<Vec<(String, KeyRingSecret)>> {
+        let id = id.as_ref();
         let key_chain = SecretService::new(EncryptionType::Dh).map_err(|e| KeyRingError::from(e))?;
         let collection = key_chain
             .get_default_collection()
@@ -136,7 +138,9 @@ impl KeyRing for LinuxOsKeyRing {
         Ok(out)
     }
 
-    fn set_secret(&mut self, id: &str, secret: &[u8]) -> Result<()> {
+    fn set_secret<S: AsRef<str>, B: AsRef<[u8]>>(&mut self, id: S, secret: B) -> Result<()> {
+        let id = id.as_ref();
+        let secret = secret.as_ref();
         let collection = self
             .keychain
             .get_default_collection()
@@ -162,7 +166,8 @@ impl KeyRing for LinuxOsKeyRing {
         Ok(())
     }
 
-    fn delete_secret(&mut self, id: &str) -> Result<()> {
+    fn delete_secret<S: AsRef<str>>(&mut self, id: S) -> Result<()> {
+        let id = id.as_ref();
         let collection = self
             .keychain
             .get_default_collection()

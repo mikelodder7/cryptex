@@ -178,18 +178,18 @@ impl MacOsKeyRing {
 }
 
 impl KeyRing for MacOsKeyRing {
-    fn new(service: &str) -> Result<Self> {
+    fn new<S: AsRef<str>>(service: S) -> Result<Self> {
         Ok(MacOsKeyRing {
             keychain: SecKeychain::default().map_err(|e| KeyRingError::from(e))?,
-            service: service.to_string(),
+            service: service.as_ref().to_string(),
         })
     }
 
-    fn get_secret(&mut self, id: &str) -> Result<KeyRingSecret> {
+    fn get_secret<S: AsRef<str>>(&mut self, id: S) -> Result<KeyRingSecret> {
         self.unlock()?;
         let (pass, _) = self
             .keychain
-            .find_generic_password(&self.service, &self.get_target_name(id))
+            .find_generic_password(&self.service, &self.get_target_name(id.as_ref()))
             .map_err(|e| {
                 KeyRingError::from(e)
             })?;
@@ -302,7 +302,8 @@ impl KeyRing for MacOsKeyRing {
         Ok(out)
     }
 
-    fn peek_secret(id: &str) -> Result<Vec<(String, KeyRingSecret)>> {
+    fn peek_secret<S: AsRef<str>>(id: S) -> Result<Vec<(String, KeyRingSecret)>> {
+        let id = id.as_ref();
         if id.is_empty() {
             return MacOsKeyRing::_find_all_passwords();
         }
@@ -341,18 +342,18 @@ impl KeyRing for MacOsKeyRing {
         }
     }
 
-    fn set_secret(&mut self, id: &str, secret: &[u8]) -> Result<()> {
+    fn set_secret<S: AsRef<str>, B: AsRef<[u8]>>(&mut self, id: S, secret: B) -> Result<()> {
         self.unlock()?;
         self.keychain
-            .set_generic_password(&self.service, &self.get_target_name(id), secret)
+            .set_generic_password(&self.service, &self.get_target_name(id.as_ref()), secret.as_ref())
             .map_err(|e| e.into())
     }
 
-    fn delete_secret(&mut self, id: &str) -> Result<()> {
+    fn delete_secret<S: AsRef<str>>(&mut self, id: S) -> Result<()> {
         self.unlock()?;
         let (_, item) = self
             .keychain
-            .find_generic_password(&self.service, &self.get_target_name(id))
+            .find_generic_password(&self.service, &self.get_target_name(id.as_ref()))
             .map_err(|e| KeyRingError::from(e))?;
         item.delete();
         Ok(())

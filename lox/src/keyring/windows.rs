@@ -63,14 +63,15 @@ impl WindowsOsKeyRing {
 }
 
 impl KeyRing for WindowsOsKeyRing {
-    fn new(service: &str) -> Result<Self> {
+    fn new<S: AsRef<str>>(service: S) -> Result<Self> {
         Ok(WindowsOsKeyRing {
-            service: service.to_string(),
+            service: service.as_ref().to_string(),
             username: whoami::username(),
         })
     }
 
-    fn get_secret(&mut self, id: &str) -> Result<KeyRingSecret> {
+    fn get_secret<S: AsRef<str>>(&mut self, id: S) -> Result<KeyRingSecret> {
+        let id = id.as_ref();
         let mut target_name = self.get_target_name(id);
         let mut pcredential: PCREDENTIALW = std::ptr::null_mut();
 
@@ -157,7 +158,8 @@ impl KeyRing for WindowsOsKeyRing {
         Ok(found_credentials)
     }
 
-    fn peek_secret(id: &str) -> Result<Vec<(String, KeyRingSecret)>> {
+    fn peek_secret<S: AsRef<str>>(id: S) -> Result<Vec<(String, KeyRingSecret)>> {
+        let id = id.as_ref();
         let flags = if id.is_empty() {
             CRED_ENUMERATE_ALL_CREDENTIALS
         } else {
@@ -169,7 +171,9 @@ impl KeyRing for WindowsOsKeyRing {
         Ok(found_credentials)
     }
 
-    fn set_secret(&mut self, id: &str, secret: &[u8]) -> Result<()> {
+    fn set_secret<S: AsRef<str>, B: AsRef<[u8]>>(&mut self, id: S, secret: B) -> Result<()> {
+        let id = id.as_ref();
+        let secret = secret.as_ref();
         let mut target_name = self.get_target_name(id);
         let mut empty = to_utf16_bytes("");
         let attributes: PCREDENTIAL_ATTRIBUTEW = std::ptr::null_mut();
@@ -231,8 +235,8 @@ impl KeyRing for WindowsOsKeyRing {
         res
     }
 
-    fn delete_secret(&mut self, id: &str) -> Result<()> {
-        let target_name = self.get_target_name(id);
+    fn delete_secret<S: AsRef<str>>(&mut self, id: S) -> Result<()> {
+        let target_name = self.get_target_name(id.as_ref());
 
         match unsafe { CredDeleteW(target_name.as_ptr(), CRED_TYPE_GENERIC, 0) } {
             0 => WindowsOsKeyRing::handle_err::<()>(),

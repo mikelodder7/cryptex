@@ -12,7 +12,7 @@ name = "lox"
 [dependencies]
 clap = "2.33.0"
 colored = "1.8.0"
-liblox = { path = "../lox", version = "^0.3.0", package = "lox" }
+liblox = { path = "../lox", version = "^0.4.0", package = "lox" }
 zeroize = "1.0.0"
 rpassword = "4.0.1"
 atty = "0.2.13"
