@@ -17,7 +17,7 @@
 use secret_service::{EncryptionType, SecretService};
 
 use crate::base::Result;
-use crate::error::KeyRingError;
+use crate::error::{KeyRingError, KeyRingErrorKind};
 use crate::keyring::get_username;
 use crate::parse_peek_criteria;
 use crate::KeyRing;
@@ -58,7 +58,7 @@ impl KeyRing for LinuxOsKeyRing {
         let search = collection
             .search_items(attributes)
             .map_err(|e| KeyRingError::from(e))?;
-        let item = search.get(0).ok_or_else(|| KeyRingError::ItemNotFound)?;
+        let item = search.get(0).ok_or_else(|| KeyRingError::from(KeyRingErrorKind::ItemNotFound))?;
         let secret = item.get_secret().map_err(|e| KeyRingError::from(e))?;
         Ok(KeyRingSecret(secret))
     }
@@ -184,7 +184,7 @@ impl KeyRing for LinuxOsKeyRing {
         let search = collection
             .search_items(attributes)
             .map_err(|e| KeyRingError::from(e))?;
-        let item = search.get(0).ok_or_else(|| "No secret found".to_string())?;
+        let item = search.get(0).ok_or_else(|| KeyRingError::from("No secret found"))?;
         item.delete().map_err(|e| KeyRingError::from(e))
     }
 }
