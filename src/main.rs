@@ -23,25 +23,25 @@
     trivial_numeric_casts
 )]
 
-use std::path::PathBuf;
-use std::io::{self, Read, Write};
-use std::fs::File;
 use clap::{App, Arg, ArgMatches, SubCommand};
-use liblox::keyring::get_os_keyring;
-use liblox::{KeyRing, KeyRingSecret};
-use zeroize::Zeroize;
 use colored::Colorize;
+use cryptex::keyring::get_os_keyring;
+use cryptex::{KeyRing, KeyRingSecret};
+use std::fs::File;
+use std::io::{self, Read, Write};
+use std::path::PathBuf;
+use zeroize::Zeroize;
 
 use std::collections::BTreeMap;
 
 #[cfg(target_os = "macos")]
-use liblox::keyring::macos::MacOsKeyRing as OsKeyRing;
+use cryptex::keyring::macos::MacOsKeyRing as OsKeyRing;
 
 #[cfg(target_os = "linux")]
-use liblox::keyring::linux::LinuxOsKeyRing as OsKeyRing;
+use cryptex::keyring::linux::LinuxOsKeyRing as OsKeyRing;
 
 #[cfg(target_os = "windows")]
-use liblox::keyring::windows::WindowsOsKeyRing as OsKeyRing;
+use cryptex::keyring::windows::WindowsOsKeyRing as OsKeyRing;
 
 fn main() {
     let matches = App::new("Lox")
@@ -102,8 +102,7 @@ fn main() {
         peek(matches)
     } else if let Some(_) = matches.subcommand_matches("list") {
         list()
-    }
-    else {
+    } else {
         die::<()>("Please specify a command to run [get | set | delete | peek | list]");
     }
 }
@@ -112,7 +111,9 @@ fn get(matches: &ArgMatches) {
     let mut keyring = get_keyring(matches);
     let id = get_id(matches, true);
 
-    let secret = keyring.get_secret(&id).unwrap_or_else(|e| die::<KeyRingSecret>(&e.to_string()));
+    let secret = keyring
+        .get_secret(&id)
+        .unwrap_or_else(|e| die::<KeyRingSecret>(&e.to_string()));
     io::stdout().write_all(secret.as_slice()).unwrap();
     io::stdout().flush().unwrap();
 }
@@ -120,7 +121,8 @@ fn get(matches: &ArgMatches) {
 fn peek(matches: &ArgMatches) {
     let id = get_id(matches, false);
 
-    let secrets = OsKeyRing::peek_secret(&id).unwrap_or_else(|e| die::<Vec<(String, KeyRingSecret)>>(&e.to_string()));
+    let secrets = OsKeyRing::peek_secret(&id)
+        .unwrap_or_else(|e| die::<Vec<(String, KeyRingSecret)>>(&e.to_string()));
 
     if secrets.len() == 1 && !id.is_empty() {
         io::stdout().write_all(secrets[0].1.as_slice()).unwrap();
@@ -137,7 +139,8 @@ fn peek(matches: &ArgMatches) {
 }
 
 fn list() {
-    let secret_names = OsKeyRing::list_secrets().unwrap_or_else(|e| die::<Vec<BTreeMap<String, String>>>(&e.to_string()));
+    let secret_names = OsKeyRing::list_secrets()
+        .unwrap_or_else(|e| die::<Vec<BTreeMap<String, String>>>(&e.to_string()));
     for s in secret_names {
         println!("{:?}", s);
     }
@@ -147,7 +150,9 @@ fn delete(matches: &ArgMatches) {
     let mut keyring = get_keyring(matches);
     let id = get_id(matches, true);
 
-    keyring.delete_secret(&id).unwrap_or_else(|e| die::<()>(&e.to_string()));
+    keyring
+        .delete_secret(&id)
+        .unwrap_or_else(|e| die::<()>(&e.to_string()));
     println!("{}", "Success".green());
 }
 
@@ -156,7 +161,9 @@ fn set(matches: &ArgMatches) {
     let id = matches.value_of("ID").unwrap();
     let mut secret = read_input(matches, "SECRET", true);
 
-    keyring.set_secret(&id, &secret).unwrap_or_else(|e| die::<()>(&format!("Failed: {}", e)));
+    keyring
+        .set_secret(&id, &secret)
+        .unwrap_or_else(|e| die::<()>(&format!("Failed: {}", e)));
     secret.zeroize();
     println!("{}", "Success".green());
 }
@@ -176,33 +183,28 @@ fn get_keyring(matches: &ArgMatches) -> OsKeyRing {
     let service = matches.value_of("SERVICE").unwrap();
     match get_os_keyring(&service) {
         Ok(keyring) => keyring,
-        Err(e) => die::<OsKeyRing>(&format!("Unable to get OS keyring: {}", e.to_string()))
+        Err(e) => die::<OsKeyRing>(&format!("Unable to get OS keyring: {}", e.to_string())),
     }
 }
 
 fn read_input(matches: &ArgMatches, name: &str, read_stdin: bool) -> Vec<u8> {
     match matches.value_of(name) {
-        Some(text) => {
-            match get_file(text) {
-                Some(file) => {
-                    match File::open(file.as_path()) {
-                        Ok(mut f) => {
-                            read_stream(&mut f)
-                        },
-                        Err(_) => {
-                            die::<Vec<u8>>(&format!("Unable to read file {}", file.to_str().unwrap()))
-                        }
-                    }
+        Some(text) => match get_file(text) {
+            Some(file) => match File::open(file.as_path()) {
+                Ok(mut f) => read_stream(&mut f),
+                Err(_) => {
+                    die::<Vec<u8>>(&format!("Unable to read file {}", file.to_str().unwrap()))
                 }
-                None => {
-                    text.as_bytes().to_vec()
-                }
-            }
-        }
+            },
+            None => text.as_bytes().to_vec(),
+        },
         None => {
             if atty::is(atty::Stream::Stdin) {
                 if read_stdin {
-                    rpassword::read_password_from_tty(Some("Enter Secret: ")).unwrap().as_bytes().to_vec()
+                    rpassword::read_password_from_tty(Some("Enter Secret: "))
+                        .unwrap()
+                        .as_bytes()
+                        .to_vec()
                 } else {
                     Vec::new()
                 }
@@ -245,7 +247,7 @@ fn get_file(name: &str) -> Option<PathBuf> {
         if metadata.file_type().is_symlink() {
             match file.as_path().read_link() {
                 Ok(f) => file = f,
-                Err(_) => die::<()>(&format!("Can't read the symbolic link: {}", name))
+                Err(_) => die::<()>(&format!("Can't read the symbolic link: {}", name)),
             }
         }
         Some(file)

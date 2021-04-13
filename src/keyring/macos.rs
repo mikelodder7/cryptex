@@ -28,8 +28,8 @@ use security_framework_sys::item::{
     //                                   kSecClassIdentity
     kSecMatchLimit,
     kSecReturnAttributes,
-    SecItemCopyMatching,
 };
+use security_framework_sys::keychain_item::SecItemCopyMatching;
 
 use core_foundation::dictionary::{
     kCFTypeDictionaryKeyCallBacks, kCFTypeDictionaryValueCallBacks, CFDictionary,
@@ -190,9 +190,7 @@ impl KeyRing for MacOsKeyRing {
         let (pass, _) = self
             .keychain
             .find_generic_password(&self.service, &self.get_target_name(id.as_ref()))
-            .map_err(|e| {
-                KeyRingError::from(e)
-            })?;
+            .map_err(|e| KeyRingError::from(e))?;
         Ok(KeyRingSecret(pass.to_owned()))
     }
 
@@ -329,7 +327,7 @@ impl KeyRing for MacOsKeyRing {
                     }
                 }
                 _ => Err("Unknown kind provided".into()),
-            }
+            };
         }
         if can_find_internet(&search_criteria) {
             let res = MacOsKeyRing::_find_internet_password(&search_criteria)?;
@@ -345,7 +343,11 @@ impl KeyRing for MacOsKeyRing {
     fn set_secret<S: AsRef<str>, B: AsRef<[u8]>>(&mut self, id: S, secret: B) -> Result<()> {
         self.unlock()?;
         self.keychain
-            .set_generic_password(&self.service, &self.get_target_name(id.as_ref()), secret.as_ref())
+            .set_generic_password(
+                &self.service,
+                &self.get_target_name(id.as_ref()),
+                secret.as_ref(),
+            )
             .map_err(|e| e.into())
     }
 

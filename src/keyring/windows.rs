@@ -26,6 +26,7 @@ use std::os::windows::ffi::{OsStrExt, OsStringExt};
 
 use winapi::ctypes::c_void;
 
+use crate::error::KeyRingError;
 use std::collections::BTreeMap;
 use winapi::shared::minwindef::FILETIME;
 use winapi::shared::winerror::{ERROR_INVALID_FLAGS, ERROR_NOT_FOUND, ERROR_NO_SUCH_LOGON_SESSION};
@@ -39,7 +40,6 @@ use winapi::um::wincred::{
 };
 use winapi::um::wincrypt::{CRYPTOAPI_BLOB, PDATA_BLOB};
 use zeroize::Zeroize;
-use crate::error::KeyRingError;
 
 pub struct WindowsOsKeyRing {
     service: String,

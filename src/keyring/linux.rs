@@ -17,7 +17,7 @@
 use secret_service::{EncryptionType, SecretService};
 
 use crate::base::Result;
-use crate::error::{KeyRingError, KeyRingErrorKind};
+use crate::error::KeyRingError;
 use crate::keyring::get_username;
 use crate::parse_peek_criteria;
 use crate::KeyRing;
@@ -58,20 +58,25 @@ impl KeyRing for LinuxOsKeyRing {
         let search = collection
             .search_items(attributes)
             .map_err(|e| KeyRingError::from(e))?;
-        let item = search.get(0).ok_or_else(|| KeyRingError::from(KeyRingErrorKind::ItemNotFound))?;
+        let item = search
+            .get(0)
+            .ok_or_else(|| KeyRingError::from(KeyRingError::ItemNotFound))?;
         let secret = item.get_secret().map_err(|e| KeyRingError::from(e))?;
         Ok(KeyRingSecret(secret))
     }
 
     fn list_secrets() -> Result<Vec<BTreeMap<String, String>>> {
-        let key_chain = SecretService::new(EncryptionType::Dh).map_err(|e| KeyRingError::from(e))?;
+        let key_chain =
+            SecretService::new(EncryptionType::Dh).map_err(|e| KeyRingError::from(e))?;
         let collection = key_chain
             .get_default_collection()
             .map_err(|e| KeyRingError::from(e))?;
         if collection.is_locked().map_err(|e| KeyRingError::from(e))? {
             collection.unlock().map_err(|e| KeyRingError::from(e))?
         }
-        let items = collection.get_all_items().map_err(|e| KeyRingError::from(e))?;
+        let items = collection
+            .get_all_items()
+            .map_err(|e| KeyRingError::from(e))?;
         let mut out = Vec::new();
         for item in &items {
             match item.get_attributes() {
@@ -93,7 +98,8 @@ impl KeyRing for LinuxOsKeyRing {
 
     fn peek_secret<S: AsRef<str>>(id: S) -> Result<Vec<(String, KeyRingSecret)>> {
         let id = id.as_ref();
-        let key_chain = SecretService::new(EncryptionType::Dh).map_err(|e| KeyRingError::from(e))?;
+        let key_chain =
+            SecretService::new(EncryptionType::Dh).map_err(|e| KeyRingError::from(e))?;
         let collection = key_chain
             .get_default_collection()
             .map_err(|e| KeyRingError::from(e))?;
@@ -102,7 +108,9 @@ impl KeyRing for LinuxOsKeyRing {
         }
         let attributes = parse_peek_criteria(id);
 
-        let items = collection.get_all_items().map_err(|e| KeyRingError::from(e))?;
+        let items = collection
+            .get_all_items()
+            .map_err(|e| KeyRingError::from(e))?;
         let mut out = Vec::new();
 
         for item in &items {
@@ -184,7 +192,9 @@ impl KeyRing for LinuxOsKeyRing {
         let search = collection
             .search_items(attributes)
             .map_err(|e| KeyRingError::from(e))?;
-        let item = search.get(0).ok_or_else(|| KeyRingError::from("No secret found"))?;
+        let item = search
+            .get(0)
+            .ok_or_else(|| KeyRingError::from("No secret found"))?;
         item.delete().map_err(|e| KeyRingError::from(e))
     }
 }

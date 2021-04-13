@@ -1,5 +1,52 @@
-[workspace]
-members = [
-    "lox",
-    "lox-cli"
-]
+[package]
+name = "cryptex"
+version = "1.0.0"
+authors = ["Michael Lodder <redmike7@gmail.com>"]
+description = """
+Cryptex uses system keyrings to store and retrieve ecrets
+"""
+license = "Apache-2.0"
+repository = "https://github.com/mikelodder7/cryptex"
+homepage = "https://github.com/mikelodder7/cryptex"
+readme = "README.md"
+categories = []
+keywords = ["secrets", "vault", "keyring"]
+edition = "2018"
+
+[lib]
+crate-type = ["staticlib", "rlib", "cdylib"]
+
+[[bin]]
+name = "cryptex"
+
+[features]
+default = []
+
+[dependencies]
+atty = "0.2"
+clap = "2.33"
+colored = "2.0"
+hex = "0.4"
+rand = "0.8"
+rpassword = "5.0"
+serde = { version = "1.0", optional = true }
+subtle = "2.4"
+whoami = "1.1"
+zeroize = { version = "1.2", features = ["zeroize_derive"] }
+
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
+users = "0.11"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "2.2"
+security-framework-sys = "2.2"
+core-foundation = "0.9"
+core-foundation-sys = "0.8"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+secret-service = "1.1"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winapi = { version = "0.3", features = ["dpapi", "errhandlingapi", "wincred", "winerror"] }
+byteorder = "1.4"
+

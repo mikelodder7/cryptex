@@ -1,5 +1,5 @@
 /*
- * Copyright 2019 Michael Lodder
+ * Copyright 2021 Michael Lodder
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,27 +22,8 @@
     trivial_numeric_casts
 )]
 
-#[cfg(target_os = "windows")]
-extern crate byteorder;
-#[cfg(target_os = "macos")]
-extern crate core_foundation;
-#[cfg(target_os = "macos")]
-extern crate core_foundation_sys;
-#[cfg(target_os = "linux")]
-extern crate secret_service;
-#[cfg(target_os = "macos")]
-extern crate security_framework;
-#[cfg(target_os = "macos")]
-extern crate security_framework_sys;
-#[cfg(feature = "serde")]
-extern crate serde;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-extern crate users;
-#[cfg(target_os = "windows")]
-extern crate winapi;
-
-use subtle::ConstantTimeEq;
 use std::collections::BTreeMap;
+use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 
 pub mod base {
@@ -50,10 +31,10 @@ pub mod base {
 }
 
 pub mod prelude {
-    pub use super::{KeyRing, KeyRingSecret,
-                    base::Result as KeyRingResult,
-                    keyring::get_os_keyring,
-                    error::{KeyRingError, KeyRingErrorKind}};
+    pub use super::{
+        base::Result as KeyRingResult, error::KeyRingError, keyring::get_os_keyring, KeyRing,
+        KeyRingSecret,
+    };
 }
 
 pub trait KeyRing: Sized {
@@ -83,7 +64,9 @@ impl KeyRingSecret {
         self.0.as_slice()
     }
 
-    pub fn as_mut_slice(&mut self) -> &mut [u8] { self.0.as_mut_slice() }
+    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        self.0.as_mut_slice()
+    }
 
     pub fn to_vec(&self) -> Vec<u8> {
         self.0.to_vec()
@@ -215,10 +198,7 @@ impl<'a> serde::de::Deserialize<'a> for KeyRingSecret {
         impl<'a> ::serde::de::Visitor<'a> for Thingvisitor {
             type Value = KeyRingSecret;
 
-            fn expecting(
-                &self,
-                formatter: &mut ::std::fmt::Formatter,
-            ) -> ::std::fmt::Result {
+            fn expecting(&self, formatter: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
                 write!(formatter, "expected KeyRingSecret")
             }
 
@@ -226,7 +206,9 @@ impl<'a> serde::de::Deserialize<'a> for KeyRingSecret {
             where
                 E: ::serde::de::Error,
             {
-                Ok(KeyRingSecret(hex::decode(value).map_err(::serde::de::Error::custom)?))
+                Ok(KeyRingSecret(
+                    hex::decode(value).map_err(::serde::de::Error::custom)?,
+                ))
             }
         }
 
@@ -234,8 +216,8 @@ impl<'a> serde::de::Deserialize<'a> for KeyRingSecret {
     }
 }
 
-pub mod keyring;
 pub mod error;
+pub mod keyring;
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn parse_peek_criteria(id: &str) -> BTreeMap<String, String> {
