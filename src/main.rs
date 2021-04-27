@@ -1,19 +1,7 @@
 /*
- * Copyright 2019 Michael Lodder
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- * -----------------------------------------------------------------------------
- */
+    Copyright Michael Lodder. All Rights Reserved.
+    SPDX-License-Identifier: Apache-2.0
+*/
 #![deny(
     warnings,
     unsafe_code,
@@ -25,8 +13,9 @@
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 use colored::Colorize;
-use cryptex::keyring::get_os_keyring;
-use cryptex::{KeyRing, KeyRingSecret};
+use cryptex::{
+    get_os_keyring, KeyRing, KeyRingSecret,
+};
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
@@ -35,7 +24,7 @@ use zeroize::Zeroize;
 use std::collections::BTreeMap;
 
 #[cfg(target_os = "macos")]
-use cryptex::keyring::macos::MacOsKeyRing as OsKeyRing;
+use cryptex::macos::MacOsKeyRing as OsKeyRing;
 
 #[cfg(target_os = "linux")]
 use cryptex::keyring::linux::LinuxOsKeyRing as OsKeyRing;

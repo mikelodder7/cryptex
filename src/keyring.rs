@@ -1,19 +1,10 @@
 /*
- * Copyright 2019 Michael Lodder
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- * -----------------------------------------------------------------------------
- */
+    Copyright Michael Lodder. All Rights Reserved.
+    SPDX-License-Identifier: Apache-2.0
+*/
+
+mod keyringsecret;
+
 #[cfg(target_os = "linux")]
 pub mod linux;
 #[cfg(target_os = "macos")]
@@ -30,8 +21,12 @@ pub(crate) use self::linux::LinuxOsKeyRing as OsKeyRing;
 #[cfg(target_os = "windows")]
 pub(crate) use self::windows::WindowsOsKeyRing as OsKeyRing;
 
-use crate::base::Result;
-use crate::KeyRing;
+use std::collections::BTreeMap;
+
+pub type Result<T> = std::result::Result<T, crate::error::KeyRingError>;
+
+pub use keyringsecret::*;
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use users::{get_current_username, get_effective_username};
 
@@ -61,4 +56,31 @@ fn get_username() -> String {
         },
         None => get_current_user(),
     }
+}
+
+/// A trait for all key rings
+pub trait KeyRing: Sized {
+    fn new<S: AsRef<str>>(service: S) -> Result<Self>;
+
+    fn get_secret<S: AsRef<str>>(&mut self, id: S) -> Result<KeyRingSecret>;
+
+    fn set_secret<S: AsRef<str>, B: AsRef<[u8]>>(&mut self, id: S, secret: B) -> Result<()>;
+
+    fn delete_secret<S: AsRef<str>>(&mut self, id: S) -> Result<()>;
+
+    fn peek_secret<S: AsRef<str>>(id: S) -> Result<Vec<(String, KeyRingSecret)>>;
+
+    fn list_secrets() -> Result<Vec<BTreeMap<String, String>>>;
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub(crate) fn parse_peek_criteria(id: &str) -> BTreeMap<String, String> {
+    let mut result = BTreeMap::new();
+    if !id.is_empty() {
+        for pair in id.split(',') {
+            let s = pair.split('=').collect::<Vec<&str>>();
+            result.insert(s[0].to_string(), s[1].to_string());
+        }
+    }
+    result
 }

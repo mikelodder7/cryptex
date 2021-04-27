@@ -1,24 +1,11 @@
 /*
- * Copyright 2019 Michael Lodder
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- * -----------------------------------------------------------------------------
- */
+    Copyright Michael Lodder. All Rights Reserved.
+    SPDX-License-Identifier: Apache-2.0
+*/
 use security_framework::os::macos::keychain::*;
 use security_framework::os::macos::passwords::{
     find_generic_password, find_internet_password, SecAuthenticationType, SecProtocolType,
 };
-
 use security_framework_sys::item::{
     kSecClass,
     kSecClassGenericPassword,
@@ -53,12 +40,8 @@ use core_foundation_sys::string::CFStringRef;
 
 use std::ffi::c_void;
 
-use crate::base::Result;
+use super::{get_username, parse_peek_criteria, KeyRing, KeyRingSecret, Result};
 use crate::error::KeyRingError;
-use crate::keyring::get_username;
-use crate::parse_peek_criteria;
-use crate::KeyRing;
-use crate::KeyRingSecret;
 use std::collections::BTreeMap;
 use std::string::ToString;
 
