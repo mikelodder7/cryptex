@@ -13,9 +13,7 @@
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 use colored::Colorize;
-use cryptex::{
-    get_os_keyring, KeyRing, KeyRingSecret,
-};
+use cryptex::{get_os_keyring, KeyRing, KeyRingSecret};
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
@@ -89,7 +87,7 @@ fn main() {
         delete(matches)
     } else if let Some(matches) = matches.subcommand_matches("peek") {
         peek(matches)
-    } else if let Some(_) = matches.subcommand_matches("list") {
+    } else if matches.subcommand_matches("list").is_some() {
         list()
     } else {
         die::<()>("Please specify a command to run [get | set | delete | peek | list]");
@@ -116,12 +114,12 @@ fn peek(matches: &ArgMatches) {
     if secrets.len() == 1 && !id.is_empty() {
         io::stdout().write_all(secrets[0].1.as_slice()).unwrap();
         io::stdout().flush().unwrap();
-        println!("");
+        println!();
     } else {
         for s in secrets {
             print!("{} -> ", s.0);
             io::stdout().write_all(s.1.as_slice()).unwrap();
-            println!("");
+            println!();
             io::stdout().flush().unwrap();
         }
     }
@@ -161,7 +159,7 @@ fn get_id(matches: &ArgMatches, read_stdin: bool) -> String {
     let id = read_input(matches, "ID", read_stdin);
     let mut id_str = String::new();
     if let Ok(s) = String::from_utf8(id).map_err(|e| format!("{}", e)) {
-        id_str = s.to_string();
+        id_str = s;
     } else {
         die::<()>("ID cannot be read properly");
     }

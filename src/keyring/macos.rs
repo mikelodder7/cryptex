@@ -85,7 +85,7 @@ impl MacOsKeyRing {
             protocol,
             authentication_type,
         )
-        .map_err(|e| KeyRingError::from(e))?;
+        .map_err(KeyRingError::from)?;
         Ok(KeyRingSecret(pass.to_owned()))
     }
 
@@ -95,15 +95,15 @@ impl MacOsKeyRing {
             &search_criteria["service"],
             &search_criteria["account"],
         )
-        .map_err(|e| KeyRingError::from(e))?;
+        .map_err(KeyRingError::from)?;
         Ok(KeyRingSecret(pass.to_owned()))
     }
 
     fn _find_all_passwords() -> Result<Vec<(String, KeyRingSecret)>> {
         let mut out = Vec::new();
 
-        let mut keychain = SecKeychain::default().map_err(|e| KeyRingError::from(e))?;
-        keychain.unlock(None).map_err(|e| KeyRingError::from(e))?;
+        let mut keychain = SecKeychain::default().map_err(KeyRingError::from)?;
+        keychain.unlock(None).map_err(KeyRingError::from)?;
 
         let secret_names = MacOsKeyRing::list_secrets()?;
 
@@ -163,7 +163,7 @@ impl MacOsKeyRing {
 impl KeyRing for MacOsKeyRing {
     fn new<S: AsRef<str>>(service: S) -> Result<Self> {
         Ok(MacOsKeyRing {
-            keychain: SecKeychain::default().map_err(|e| KeyRingError::from(e))?,
+            keychain: SecKeychain::default().map_err(KeyRingError::from)?,
             service: service.as_ref().to_string(),
         })
     }
@@ -173,7 +173,7 @@ impl KeyRing for MacOsKeyRing {
         let (pass, _) = self
             .keychain
             .find_generic_password(&self.service, &self.get_target_name(id.as_ref()))
-            .map_err(|e| KeyRingError::from(e))?;
+            .map_err(KeyRingError::from)?;
         Ok(KeyRingSecret(pass.to_owned()))
     }
 
@@ -198,16 +198,16 @@ impl KeyRing for MacOsKeyRing {
                 kSecMatchLimitAll as *const c_void,
             );
 
-            let mut types = Vec::new();
+            let types = [
+                kSecClassGenericPassword,
+                kSecClassInternetPassword,
+                //        types.push(kSecClassCertificate);
+                //        types.push(kSecClassKey);
+                //        types.push(kSecClassIdentity);
+            ];
 
-            types.push(kSecClassGenericPassword);
-            types.push(kSecClassInternetPassword);
-            //        types.push(kSecClassCertificate);
-            //        types.push(kSecClassKey);
-            //        types.push(kSecClassIdentity);
-
-            for subtype in types {
-                CFDictionarySetValue(query, kSecClass as *const c_void, subtype as *const c_void);
+            for subtype in &types[..] {
+                CFDictionarySetValue(query, kSecClass as *const c_void, *subtype as *const c_void);
                 let mut result: CFTypeRef = std::ptr::null_mut();
                 SecItemCopyMatching(query, &mut result);
 
@@ -339,7 +339,7 @@ impl KeyRing for MacOsKeyRing {
         let (_, item) = self
             .keychain
             .find_generic_password(&self.service, &self.get_target_name(id.as_ref()))
-            .map_err(|e| KeyRingError::from(e))?;
+            .map_err(KeyRingError::from)?;
         item.delete();
         Ok(())
     }

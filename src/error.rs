@@ -22,12 +22,12 @@ pub enum KeyRingError {
 
 impl KeyRingError {
     pub fn as_str(&self) -> String {
-        match self {
-            &Self::ItemNotFound => {
+        match *self {
+            Self::ItemNotFound => {
                 "The specified item could not be found in the keychain".to_string()
             }
-            &Self::AccessDenied { ref msg } => format!("Unable to access the keychain: {:?}", msg),
-            &Self::GeneralError { ref msg } => msg.to_string(),
+            Self::AccessDenied { ref msg } => format!("Unable to access the keychain: {:?}", msg),
+            Self::GeneralError { ref msg } => msg.to_string(),
         }
     }
 }
