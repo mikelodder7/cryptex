@@ -7,7 +7,7 @@ use zeroize::Zeroize;
 
 #[derive(Zeroize)]
 #[zeroize(drop)]
-pub struct KeyRingSecret(pub(crate) Vec<u8>);
+pub struct KeyRingSecret(pub Vec<u8>);
 
 impl KeyRingSecret {
     pub fn new(d: Vec<u8>) -> Self {

@@ -13,13 +13,13 @@ pub mod macos;
 pub mod windows;
 
 #[cfg(target_os = "macos")]
-pub(crate) use self::macos::MacOsKeyRing as OsKeyRing;
+pub use self::macos::MacOsKeyRing as OsKeyRing;
 
 #[cfg(target_os = "linux")]
-pub(crate) use self::linux::LinuxOsKeyRing as OsKeyRing;
+pub use self::linux::LinuxOsKeyRing as OsKeyRing;
 
 #[cfg(target_os = "windows")]
-pub(crate) use self::windows::WindowsOsKeyRing as OsKeyRing;
+pub use self::windows::WindowsOsKeyRing as OsKeyRing;
 
 use std::collections::BTreeMap;
 
