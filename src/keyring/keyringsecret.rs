@@ -2,12 +2,28 @@
     Copyright Michael Lodder. All Rights Reserved.
     SPDX-License-Identifier: Apache-2.0
 */
+use std::{
+    fmt::{self, Debug, Display, Formatter},
+    ops::{Index, Range, RangeFrom, RangeFull, RangeTo},
+    str::FromStr,
+};
 use subtle::ConstantTimeEq;
+
+use crate::error::KeyRingError;
+#[cfg(feature = "serde")]
+use serde::{
+    de::{Error as DError, Visitor},
+    Deserialize, Deserializer, Serialize, Serializer,
+};
 use zeroize::Zeroize;
 
 #[derive(Zeroize)]
 #[zeroize(drop)]
 pub struct KeyRingSecret(pub Vec<u8>);
+
+unsafe impl Send for KeyRingSecret {}
+
+unsafe impl Sync for KeyRingSecret {}
 
 impl KeyRingSecret {
     pub fn new(d: Vec<u8>) -> Self {
@@ -66,7 +82,7 @@ impl Clone for KeyRingSecret {
     }
 }
 
-impl ::std::ops::Index<usize> for KeyRingSecret {
+impl Index<usize> for KeyRingSecret {
     type Output = u8;
 
     #[inline]
@@ -75,44 +91,44 @@ impl ::std::ops::Index<usize> for KeyRingSecret {
     }
 }
 
-impl ::std::ops::Index<::std::ops::Range<usize>> for KeyRingSecret {
+impl Index<Range<usize>> for KeyRingSecret {
     type Output = [u8];
 
     #[inline]
-    fn index(&self, index: ::std::ops::Range<usize>) -> &[u8] {
+    fn index(&self, index: Range<usize>) -> &[u8] {
         &self.0[index]
     }
 }
 
-impl ::std::ops::Index<::std::ops::RangeTo<usize>> for KeyRingSecret {
+impl Index<RangeTo<usize>> for KeyRingSecret {
     type Output = [u8];
 
     #[inline]
-    fn index(&self, index: ::std::ops::RangeTo<usize>) -> &[u8] {
+    fn index(&self, index: RangeTo<usize>) -> &[u8] {
         &self.0[index]
     }
 }
 
-impl ::std::ops::Index<::std::ops::RangeFrom<usize>> for KeyRingSecret {
+impl Index<RangeFrom<usize>> for KeyRingSecret {
     type Output = [u8];
 
     #[inline]
-    fn index(&self, index: ::std::ops::RangeFrom<usize>) -> &[u8] {
+    fn index(&self, index: RangeFrom<usize>) -> &[u8] {
         &self.0[index]
     }
 }
 
-impl ::std::ops::Index<::std::ops::RangeFull> for KeyRingSecret {
+impl Index<RangeFull> for KeyRingSecret {
     type Output = [u8];
 
     #[inline]
-    fn index(&self, _: ::std::ops::RangeFull) -> &[u8] {
+    fn index(&self, _: RangeFull) -> &[u8] {
         self.0.as_slice()
     }
 }
 
-impl ::std::fmt::Display for KeyRingSecret {
-    fn fmt(&self, formatter: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for KeyRingSecret {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
             "KeyRingSecret {{ {} }}",
@@ -121,48 +137,67 @@ impl ::std::fmt::Display for KeyRingSecret {
     }
 }
 
-impl ::std::fmt::Debug for KeyRingSecret {
-    fn fmt(&self, formatter: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Debug for KeyRingSecret {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
             "KeyRingSecret {{ {} }}",
             hex::encode(&self.0[..])
         )
+    }
+}
+
+impl FromStr for KeyRingSecret {
+    type Err = KeyRingError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let bytes = hex::decode(s).map_err(|e| KeyRingError::from(e.to_string().as_str()))?;
+        Ok(Self(bytes))
+    }
+}
+
+impl From<String> for KeyRingSecret {
+    fn from(s: String) -> Self {
+        Self::from_str(&s).unwrap()
+    }
+}
+
+impl From<&str> for KeyRingSecret {
+    fn from(s: &str) -> Self {
+        Self::from_str(s).unwrap()
     }
 }
 
 #[cfg(feature = "serde")]
-impl serde::ser::Serialize for KeyRingSecret {
+impl Serialize for KeyRingSecret {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: ::serde::ser::Serializer,
+        S: Serializer,
     {
         serializer.serialize_newtype_struct("KeyRingSecret", &hex::encode(&self.0[..]))
     }
 }
 
 #[cfg(feature = "serde")]
-impl<'a> serde::de::Deserialize<'a> for KeyRingSecret {
+impl<'a> Deserialize<'a> for KeyRingSecret {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: ::serde::de::Deserializer<'a>,
+        D: Deserializer<'a>,
     {
         struct Thingvisitor;
 
-        impl<'a> ::serde::de::Visitor<'a> for Thingvisitor {
+        impl<'a> Visitor<'a> for Thingvisitor {
             type Value = KeyRingSecret;
 
-            fn expecting(&self, formatter: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-                write!(formatter, "expected KeyRingSecret")
+            fn expecting(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+                write!(formatter, "expected string")
             }
 
             fn visit_str<E>(self, value: &str) -> Result<KeyRingSecret, E>
             where
-                E: ::serde::de::Error,
+                E: DError,
             {
-                Ok(KeyRingSecret(
-                    hex::decode(value).map_err(::serde::de::Error::custom)?,
-                ))
+                Ok(KeyRingSecret(hex::decode(value).map_err(DError::custom)?))
             }
         }
 
