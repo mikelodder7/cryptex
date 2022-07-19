@@ -25,7 +25,7 @@ use std::collections::BTreeMap;
 use cryptex::macos::MacOsKeyRing as OsKeyRing;
 
 #[cfg(target_os = "linux")]
-use cryptex::keyring::linux::LinuxOsKeyRing as OsKeyRing;
+use cryptex::linux::LinuxOsKeyRing as OsKeyRing;
 
 #[cfg(target_os = "windows")]
 use cryptex::keyring::windows::WindowsOsKeyRing as OsKeyRing;
