@@ -1,6 +1,6 @@
 [package]
 name = "cryptex"
-version = "1.1.0"
+version = "1.1.1"
 authors = ["Michael Lodder <redmike7@gmail.com>"]
 description = """
 Cryptex uses system keyrings to store and retrieve secrets

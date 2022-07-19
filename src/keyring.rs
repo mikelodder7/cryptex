@@ -59,7 +59,7 @@ fn get_username() -> String {
 }
 
 /// A trait for all key rings
-pub trait KeyRing: Sized {
+pub trait KeyRing: Sized + Send {
     fn new<S: AsRef<str>>(service: S) -> Result<Self>;
 
     fn get_secret<S: AsRef<str>>(&mut self, id: S) -> Result<KeyRingSecret>;
