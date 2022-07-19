@@ -168,9 +168,9 @@ fn get_id(matches: &ArgMatches, read_stdin: bool) -> String {
 
 fn get_keyring(matches: &ArgMatches) -> OsKeyRing {
     let service = matches.value_of("SERVICE").unwrap();
-    match get_os_keyring(&service) {
+    match get_os_keyring(service) {
         Ok(keyring) => keyring,
-        Err(e) => die::<OsKeyRing>(&format!("Unable to get OS keyring: {}", e.to_string())),
+        Err(e) => die::<OsKeyRing>(&format!("Unable to get OS keyring: {}", e)),
     }
 }
 

@@ -54,6 +54,10 @@ pub struct MacOsKeyRing {
     service: String,
 }
 
+unsafe impl Send for MacOsKeyRing {}
+
+unsafe impl Sync for MacOsKeyRing {}
+
 impl MacOsKeyRing {
     fn unlock(&mut self) -> Result<()> {
         self.keychain.unlock(None).map_err(|e| e.into())

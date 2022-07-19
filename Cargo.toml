@@ -1,6 +1,6 @@
 [package]
 name = "cryptex"
-version = "1.1.0"
+version = "1.2.0"
 authors = ["Michael Lodder <redmike7@gmail.com>"]
 description = """
 Cryptex uses system keyrings to store and retrieve secrets
@@ -29,7 +29,7 @@ colored = "2.0"
 hex = "0.4"
 rand = "0.8"
 rpassword = "5.0"
-serde = { version = "1.0", optional = true }
+serde = { version = "1", optional = true }
 subtle = "2"
 whoami = "1.1"
 zeroize = { version = "1", features = ["zeroize_derive"] }

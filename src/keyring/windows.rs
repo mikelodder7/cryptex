@@ -30,6 +30,10 @@ pub struct WindowsOsKeyRing {
     username: String,
 }
 
+unsafe impl Send for WindowsOsKeyRing {}
+
+unsafe impl Sync for WindowsOsKeyRing {}
+
 impl WindowsOsKeyRing {
     fn get_target_name(&self, id: &str) -> Vec<u16> {
         let target_name = [&self.username, &self.service, id].join(":");
