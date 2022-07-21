@@ -166,7 +166,7 @@ fn get_id(matches: &ArgMatches, read_stdin: bool) -> String {
     id_str
 }
 
-fn get_keyring(matches: &ArgMatches) -> OsKeyRing {
+fn get_keyring<'a>(matches: &'a ArgMatches) -> OsKeyRing<'a> {
     let service = matches.value_of("SERVICE").unwrap();
     match get_os_keyring(service) {
         Ok(keyring) => keyring,

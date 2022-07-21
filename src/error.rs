@@ -9,7 +9,7 @@ use std::{
 };
 
 #[cfg(target_os = "linux")]
-use secret_service::SsError as LinuxOsError;
+use secret_service::Error as LinuxOsError;
 #[cfg(target_os = "macos")]
 use security_framework::base::Error as MacOsError;
 
@@ -72,7 +72,10 @@ impl From<LinuxOsError> for KeyRingError {
     fn from(e: LinuxOsError) -> Self {
         match e {
             LinuxOsError::Crypto(_)
-            | LinuxOsError::Dbus(_)
+            | LinuxOsError::Zbus(_)
+            | LinuxOsError::ZbusFdo(_)
+            | LinuxOsError::ZbusMsg(_)
+            | LinuxOsError::Zvariant(_)
             | LinuxOsError::Parse
             | LinuxOsError::Prompt => KeyRingError::GeneralError {
                 msg: format!("{:?}", e.to_string()),

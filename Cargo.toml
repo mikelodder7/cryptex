@@ -1,6 +1,6 @@
 [package]
 name = "cryptex"
-version = "1.2.0"
+version = "1.3.0"
 authors = ["Michael Lodder <redmike7@gmail.com>"]
 description = """
 Cryptex uses system keyrings to store and retrieve secrets
@@ -47,7 +47,8 @@ core-foundation = "0.9"
 core-foundation-sys = "0.8"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-secret-service = "1.1"
+maplit = "1"
+secret-service = "2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "0.3", features = ["dpapi", "errhandlingapi", "wincred", "winerror"] }

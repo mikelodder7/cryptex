@@ -30,7 +30,13 @@ pub use keyringsecret::*;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use users::{get_current_username, get_effective_username};
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub fn get_os_keyring(service: &str) -> Result<OsKeyRing> {
+    OsKeyRing::new(service)
+}
+
+#[cfg(target_os = "linux")]
+pub fn get_os_keyring<'a>(service: &str) -> Result<OsKeyRing<'a>> {
     OsKeyRing::new(service)
 }
 

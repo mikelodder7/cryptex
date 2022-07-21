@@ -9,17 +9,17 @@ use crate::error::KeyRingError;
 
 use std::collections::BTreeMap;
 
-pub struct LinuxOsKeyRing {
-    keychain: SecretService,
+pub struct LinuxOsKeyRing<'a> {
+    keychain: SecretService<'a>,
     service: String,
     username: String,
 }
 
-unsafe impl Send for LinuxOsKeyRing {}
+unsafe impl<'a> Send for LinuxOsKeyRing<'a> {}
 
-unsafe impl Sync for LinuxOsKeyRing {}
+unsafe impl<'a> Sync for LinuxOsKeyRing<'a> {}
 
-impl KeyRing for LinuxOsKeyRing {
+impl<'a> KeyRing for LinuxOsKeyRing<'a> {
     fn new<S: AsRef<str>>(service: S) -> Result<Self> {
         Ok(LinuxOsKeyRing {
             keychain: SecretService::new(EncryptionType::Dh).map_err(KeyRingError::from)?,
@@ -37,11 +37,11 @@ impl KeyRing for LinuxOsKeyRing {
         if collection.is_locked().map_err(KeyRingError::from)? {
             collection.unlock().map_err(KeyRingError::from)?
         }
-        let attributes = vec![
-            ("application", "lox"),
-            ("service", &self.service),
-            ("username", &self.username),
-            ("id", id),
+        let attributes = maplit::hashmap![
+            "application" => "lox",
+            "service" => &self.service,
+            "username" => &self.username,
+            "id" => id,
         ];
         let search = collection
             .search_items(attributes)
@@ -64,7 +64,7 @@ impl KeyRing for LinuxOsKeyRing {
         for item in &items {
             match item.get_attributes() {
                 Ok(atts) => {
-                    out.push(vec_to_btreemap(atts));
+                    out.push(BTreeMap::from_iter(atts.into_iter()));
                 }
                 Err(e) => {
                     if !out.is_empty() {
@@ -97,10 +97,9 @@ impl KeyRing for LinuxOsKeyRing {
             match item.get_attributes() {
                 Ok(atts) => {
                     let mut matches = true;
-                    let filter = vec_to_btreemap(atts);
                     for (k, v) in &attributes {
-                        if filter.contains_key(k) {
-                            matches = filter[k] == v.as_str();
+                        if atts.contains_key(k) {
+                            matches = atts[k] == v.as_str();
                         } else {
                             matches = false;
                         }
@@ -110,7 +109,7 @@ impl KeyRing for LinuxOsKeyRing {
                     }
                     if matches || id.is_empty() {
                         let secret = item.get_secret().map_err(KeyRingError::from)?;
-                        out.push((format!("{:?}", filter), KeyRingSecret(secret)));
+                        out.push((format!("{:?}", atts), KeyRingSecret(secret)));
                     }
                 }
                 Err(e) => {
@@ -136,11 +135,11 @@ impl KeyRing for LinuxOsKeyRing {
         if collection.is_locked().map_err(KeyRingError::from)? {
             collection.unlock().map_err(KeyRingError::from)?
         }
-        let attributes = vec![
-            ("application", "lox"),
-            ("service", &self.service),
-            ("username", &self.username),
-            ("id", id),
+        let attributes = maplit::hashmap![
+            "application" => "lox",
+            "service" => &self.service,
+            "username" => &self.username,
+            "id" => id,
         ];
         collection
             .create_item(
@@ -163,11 +162,11 @@ impl KeyRing for LinuxOsKeyRing {
         if collection.is_locked().map_err(KeyRingError::from)? {
             collection.unlock().map_err(KeyRingError::from)?
         }
-        let attributes = vec![
-            ("application", "lox"),
-            ("service", &self.service),
-            ("username", &self.username),
-            ("id", id),
+        let attributes = maplit::hashmap![
+            "application" => "lox",
+            "service" => &self.service,
+            "username" => &self.username,
+            "id" => id,
         ];
         let search = collection
             .search_items(attributes)
@@ -177,12 +176,4 @@ impl KeyRing for LinuxOsKeyRing {
             .ok_or_else(|| KeyRingError::from("No secret found"))?;
         item.delete().map_err(KeyRingError::from)
     }
-}
-
-fn vec_to_btreemap(values: Vec<(String, String)>) -> BTreeMap<String, String> {
-    let mut value = BTreeMap::new();
-    for (k, v) in values {
-        value.insert(k.to_string(), v.to_string());
-    }
-    value
 }
