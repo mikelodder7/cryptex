@@ -166,7 +166,17 @@ fn get_id(matches: &ArgMatches, read_stdin: bool) -> String {
     id_str
 }
 
+#[cfg(target_os = "linux")]
 fn get_keyring<'a>(matches: &'a ArgMatches) -> OsKeyRing<'a> {
+    let service = matches.value_of("SERVICE").unwrap();
+    match get_os_keyring(service) {
+        Ok(keyring) => keyring,
+        Err(e) => die::<OsKeyRing>(&format!("Unable to get OS keyring: {}", e)),
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn get_keyring(matches: &ArgMatches) -> OsKeyRing {
     let service = matches.value_of("SERVICE").unwrap();
     match get_os_keyring(service) {
         Ok(keyring) => keyring,
