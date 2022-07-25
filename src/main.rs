@@ -198,7 +198,7 @@ fn read_input(matches: &ArgMatches, name: &str, read_stdin: bool) -> Vec<u8> {
         None => {
             if atty::is(atty::Stream::Stdin) {
                 if read_stdin {
-                    rpassword::read_password_from_tty(Some("Enter Secret: "))
+                    rpassword::prompt_password("Enter Secret: ")
                         .unwrap()
                         .as_bytes()
                         .to_vec()
