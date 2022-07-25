@@ -42,8 +42,8 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 users = "0.11"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-security-framework = "2.2"
-security-framework-sys = "2.2"
+security-framework = "2.6"
+security-framework-sys = "2.6"
 core-foundation = "0.9"
 core-foundation-sys = "0.8"
 
