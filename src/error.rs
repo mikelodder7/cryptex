@@ -53,6 +53,7 @@ impl From<&str> for KeyRingError {
 impl Error for KeyRingError {}
 
 #[cfg(target_os = "macos")]
+#[cfg_attr(docsrs, doc(cfg(target_os = "macos")))]
 impl From<MacOsError> for KeyRingError {
     fn from(e: MacOsError) -> Self {
         match e.code() {
@@ -68,6 +69,7 @@ impl From<MacOsError> for KeyRingError {
 }
 
 #[cfg(target_os = "linux")]
+#[cfg_attr(docsrs, doc(cfg(target_os = "linux")))]
 impl From<LinuxOsError> for KeyRingError {
     fn from(e: LinuxOsError) -> Self {
         match e {

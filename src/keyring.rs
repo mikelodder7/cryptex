@@ -13,12 +13,15 @@ pub mod macos;
 pub mod windows;
 
 #[cfg(target_os = "macos")]
+#[cfg_attr(docsrs, doc(cfg(target_os = "macos")))]
 pub use self::macos::MacOsKeyRing as OsKeyRing;
 
 #[cfg(target_os = "linux")]
+#[cfg_attr(docsrs, doc(cfg(target_os = "linux")))]
 pub use self::linux::LinuxOsKeyRing as OsKeyRing;
 
 #[cfg(target_os = "windows")]
+#[cfg_attr(docsrs, doc(cfg(target_os = "windows")))]
 pub use self::windows::WindowsOsKeyRing as OsKeyRing;
 
 use std::collections::BTreeMap;
@@ -31,11 +34,13 @@ pub use keyringsecret::*;
 use users::{get_current_username, get_effective_username};
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg_attr(docsrs, doc(cfg(any(target_os = "macos", target_os = "windows"))))]
 pub fn get_os_keyring(service: &str) -> Result<OsKeyRing> {
     OsKeyRing::new(service)
 }
 
 #[cfg(target_os = "linux")]
+#[cfg_attr(docsrs, doc(cfg(target_os = "linux")))]
 pub fn get_os_keyring<'a>(service: &str) -> Result<OsKeyRing<'a>> {
     OsKeyRing::new(service)
 }

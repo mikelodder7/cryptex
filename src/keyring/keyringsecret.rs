@@ -168,6 +168,18 @@ impl From<&str> for KeyRingSecret {
     }
 }
 
+impl From<&[u8]> for KeyRingSecret {
+    fn from(value: &[u8]) -> Self {
+        Self(value.to_vec())
+    }
+}
+
+impl From<Vec<u8>> for KeyRingSecret {
+    fn from(value: Vec<u8>) -> Self {
+        Self(value)
+    }
+}
+
 #[cfg(feature = "serde")]
 impl Serialize for KeyRingSecret {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
