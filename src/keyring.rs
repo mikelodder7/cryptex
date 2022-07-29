@@ -70,17 +70,49 @@ fn get_username() -> String {
 }
 
 /// A trait for all key rings
-pub trait KeyRing: Sized + Send {
-    fn new<S: AsRef<str>>(service: S) -> Result<Self>;
-
+pub trait KeyRing: Send + Sync {
     fn get_secret<S: AsRef<str>>(&mut self, id: S) -> Result<KeyRingSecret>;
 
     fn set_secret<S: AsRef<str>, B: AsRef<[u8]>>(&mut self, id: S, secret: B) -> Result<()>;
 
     fn delete_secret<S: AsRef<str>>(&mut self, id: S) -> Result<()>;
+}
 
+/// Modification of [`KeyRing`] trait suitable for trait Objects
+pub trait DynKeyRing: Send + Sync {
+    fn get_secret(&mut self, id: &str) -> Result<KeyRingSecret>;
+
+    fn set_secret(&mut self, id: &str, secret: &[u8]) -> Result<()>;
+
+    fn delete_secret(&mut self, id: &str) -> Result<()>;
+}
+
+impl<D: DynKeyRing> KeyRing for D {
+    fn get_secret<S: AsRef<str>>(&mut self, id: S) -> Result<KeyRingSecret> {
+        DynKeyRing::get_secret(self, id.as_ref())
+    }
+
+    fn set_secret<S: AsRef<str>, B: AsRef<[u8]>>(&mut self, id: S, secret: B) -> Result<()> {
+        DynKeyRing::set_secret(self, id.as_ref(), secret.as_ref())
+    }
+
+    fn delete_secret<S: AsRef<str>>(&mut self, id: S) -> Result<()> {
+        DynKeyRing::delete_secret(self, id.as_ref())
+    }
+}
+
+/// A KeyRing that can be created from a service name
+pub trait NewKeyRing: Sized {
+    fn new<S: AsRef<str>>(service: S) -> Result<Self>;
+}
+
+/// A Keyring that allows inspecting the identifiers
+pub trait PeekableKeyRing {
     fn peek_secret<S: AsRef<str>>(id: S) -> Result<Vec<(String, KeyRingSecret)>>;
+}
 
+/// A Keyring that allows listing the identifiers
+pub trait ListKeyRing {
     fn list_secrets() -> Result<Vec<BTreeMap<String, String>>>;
 }
 

@@ -2,7 +2,7 @@
     Copyright Michael Lodder. All Rights Reserved.
     SPDX-License-Identifier: Apache-2.0
 */
-use super::{KeyRing, KeyRingSecret, Result};
+use super::*;
 use byteorder::{ByteOrder, LittleEndian};
 use std::ffi::{OsStr, OsString};
 use std::iter::once;
@@ -51,13 +51,6 @@ impl WindowsOsKeyRing {
 }
 
 impl KeyRing for WindowsOsKeyRing {
-    fn new<S: AsRef<str>>(service: S) -> Result<Self> {
-        Ok(WindowsOsKeyRing {
-            service: service.as_ref().to_string(),
-            username: whoami::username(),
-        })
-    }
-
     fn get_secret<S: AsRef<str>>(&mut self, id: S) -> Result<KeyRingSecret> {
         let id = id.as_ref();
         let mut target_name = self.get_target_name(id);
@@ -111,52 +104,6 @@ impl KeyRing for WindowsOsKeyRing {
         unsafe { CredFree(pcredential as *mut c_void) };
         unsafe { LocalFree(out_blob.pbData as *mut c_void) };
         res.map_err(|s| KeyRingError::from(s))
-    }
-
-    fn list_secrets() -> Result<Vec<BTreeMap<String, String>>> {
-        let filter = std::ptr::null();
-        let flags = CRED_ENUMERATE_ALL_CREDENTIALS;
-        let mut pcredentials: *mut PCREDENTIALW = std::ptr::null_mut();
-        let mut count = 0;
-
-        let res = unsafe { CredEnumerateW(filter, flags, &mut count, &mut pcredentials) };
-        if res == 0 {
-            return WindowsOsKeyRing::handle_err::<Vec<BTreeMap<String, String>>>();
-        }
-
-        let credentials: &[PCREDENTIALW] =
-            unsafe { std::slice::from_raw_parts_mut(pcredentials, count as usize) };
-
-        let mut found_credentials = Vec::new();
-
-        for c in credentials {
-            let cred: CREDENTIALW = unsafe { **c };
-            let mut i = 0isize;
-            while unsafe { *cred.TargetName.offset(i) } != 0u16 {
-                i += 1;
-            }
-            let target = unsafe { std::slice::from_raw_parts(cred.TargetName, i as usize) };
-            let name = OsString::from_wide(target).into_string().unwrap();
-            let mut value = BTreeMap::new();
-            value.insert("targetname".to_string(), name);
-
-            found_credentials.push(value);
-        }
-        unsafe { CredFree(pcredentials as *mut c_void) };
-        Ok(found_credentials)
-    }
-
-    fn peek_secret<S: AsRef<str>>(id: S) -> Result<Vec<(String, KeyRingSecret)>> {
-        let id = id.as_ref();
-        let flags = if id.is_empty() {
-            CRED_ENUMERATE_ALL_CREDENTIALS
-        } else {
-            0
-        };
-
-        let found_credentials = unsafe { get_credentials(id, flags)? };
-
-        Ok(found_credentials)
     }
 
     fn set_secret<S: AsRef<str>, B: AsRef<[u8]>>(&mut self, id: S, secret: B) -> Result<()> {
@@ -230,6 +177,65 @@ impl KeyRing for WindowsOsKeyRing {
             0 => WindowsOsKeyRing::handle_err::<()>(),
             _ => Ok(()),
         }
+    }
+}
+
+impl NewKeyRing for WindowsOsKeyRing {
+    fn new<S: AsRef<str>>(service: S) -> Result<Self> {
+        Ok(WindowsOsKeyRing {
+            service: service.as_ref().to_string(),
+            username: whoami::username(),
+        })
+    }
+}
+
+impl PeekableKeyRing for WindowsOsKeyRing {
+    fn peek_secret<S: AsRef<str>>(id: S) -> Result<Vec<(String, KeyRingSecret)>> {
+        let id = id.as_ref();
+        let flags = if id.is_empty() {
+            CRED_ENUMERATE_ALL_CREDENTIALS
+        } else {
+            0
+        };
+
+        let found_credentials = unsafe { get_credentials(id, flags)? };
+
+        Ok(found_credentials)
+    }
+}
+
+impl ListKeyRing for WindowsOsKeyRing {
+    fn list_secrets() -> Result<Vec<BTreeMap<String, String>>> {
+        let filter = std::ptr::null();
+        let flags = CRED_ENUMERATE_ALL_CREDENTIALS;
+        let mut pcredentials: *mut PCREDENTIALW = std::ptr::null_mut();
+        let mut count = 0;
+
+        let res = unsafe { CredEnumerateW(filter, flags, &mut count, &mut pcredentials) };
+        if res == 0 {
+            return WindowsOsKeyRing::handle_err::<Vec<BTreeMap<String, String>>>();
+        }
+
+        let credentials: &[PCREDENTIALW] =
+            unsafe { std::slice::from_raw_parts_mut(pcredentials, count as usize) };
+
+        let mut found_credentials = Vec::new();
+
+        for c in credentials {
+            let cred: CREDENTIALW = unsafe { **c };
+            let mut i = 0isize;
+            while unsafe { *cred.TargetName.offset(i) } != 0u16 {
+                i += 1;
+            }
+            let target = unsafe { std::slice::from_raw_parts(cred.TargetName, i as usize) };
+            let name = OsString::from_wide(target).into_string().unwrap();
+            let mut value = BTreeMap::new();
+            value.insert("targetname".to_string(), name);
+
+            found_credentials.push(value);
+        }
+        unsafe { CredFree(pcredentials as *mut c_void) };
+        Ok(found_credentials)
     }
 }
 

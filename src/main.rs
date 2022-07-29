@@ -13,7 +13,7 @@
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 use colored::Colorize;
-use cryptex::{get_os_keyring, KeyRing, KeyRingSecret};
+use cryptex::{get_os_keyring, KeyRing, KeyRingSecret, ListKeyRing, PeekableKeyRing};
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;

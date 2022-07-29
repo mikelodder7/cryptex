@@ -40,7 +40,7 @@ use core_foundation_sys::string::CFStringRef;
 
 use std::ffi::c_void;
 
-use super::{get_username, parse_peek_criteria, KeyRing, KeyRingSecret, Result};
+use super::*;
 use crate::error::KeyRingError;
 use std::collections::BTreeMap;
 use std::string::ToString;
@@ -165,13 +165,6 @@ impl MacOsKeyRing {
 }
 
 impl KeyRing for MacOsKeyRing {
-    fn new<S: AsRef<str>>(service: S) -> Result<Self> {
-        Ok(MacOsKeyRing {
-            keychain: SecKeychain::default().map_err(KeyRingError::from)?,
-            service: service.as_ref().to_string(),
-        })
-    }
-
     fn get_secret<S: AsRef<str>>(&mut self, id: S) -> Result<KeyRingSecret> {
         self.unlock()?;
         let (pass, _) = self
@@ -181,6 +174,80 @@ impl KeyRing for MacOsKeyRing {
         Ok(KeyRingSecret(pass.to_owned()))
     }
 
+    fn set_secret<S: AsRef<str>, B: AsRef<[u8]>>(&mut self, id: S, secret: B) -> Result<()> {
+        self.unlock()?;
+        self.keychain
+            .set_generic_password(
+                &self.service,
+                &self.get_target_name(id.as_ref()),
+                secret.as_ref(),
+            )
+            .map_err(|e| e.into())
+    }
+
+    fn delete_secret<S: AsRef<str>>(&mut self, id: S) -> Result<()> {
+        self.unlock()?;
+        let (_, item) = self
+            .keychain
+            .find_generic_password(&self.service, &self.get_target_name(id.as_ref()))
+            .map_err(KeyRingError::from)?;
+        item.delete();
+        Ok(())
+    }
+}
+
+impl NewKeyRing for MacOsKeyRing {
+    fn new<S: AsRef<str>>(service: S) -> Result<Self> {
+        Ok(MacOsKeyRing {
+            keychain: SecKeychain::default().map_err(KeyRingError::from)?,
+            service: service.as_ref().to_string(),
+        })
+    }
+}
+
+impl PeekableKeyRing for MacOsKeyRing {
+    fn peek_secret<S: AsRef<str>>(id: S) -> Result<Vec<(String, KeyRingSecret)>> {
+        let id = id.as_ref();
+        if id.is_empty() {
+            return MacOsKeyRing::_find_all_passwords();
+        }
+
+        let search_criteria = parse_peek_criteria(id);
+
+        if search_criteria.contains_key("kind") {
+            return match search_criteria["kind"].as_str() {
+                "generic" => {
+                    if can_find_generic(&search_criteria) {
+                        let res = MacOsKeyRing::_find_generic_password(&search_criteria)?;
+                        Ok(vec![(id.to_string(), res)])
+                    } else {
+                        Err("Missing required criteria. 'service' and 'account' must both be supplied".into())
+                    }
+                }
+                "internet" => {
+                    if can_find_internet(&search_criteria) {
+                        let res = MacOsKeyRing::_find_internet_password(&search_criteria)?;
+                        Ok(vec![(id.to_string(), res)])
+                    } else {
+                        Err("Missing required criteria. 'server', 'account', 'path', 'protocol', 'authentication_type' must all be supplied".into())
+                    }
+                }
+                _ => Err("Unknown kind provided".into()),
+            };
+        }
+        if can_find_internet(&search_criteria) {
+            let res = MacOsKeyRing::_find_internet_password(&search_criteria)?;
+            Ok(vec![(id.to_string(), res)])
+        } else if can_find_generic(&search_criteria) {
+            let res = MacOsKeyRing::_find_generic_password(&search_criteria)?;
+            Ok(vec![(id.to_string(), res)])
+        } else {
+            Err("Can't determine which secret kind to search. 'account' and 'service' or 'account' and 'server', 'path', 'protocol', 'authentication_type' must be supplied".into())
+        }
+    }
+}
+
+impl ListKeyRing for MacOsKeyRing {
     fn list_secrets() -> Result<Vec<BTreeMap<String, String>>> {
         let mut out = Vec::new();
         unsafe {
@@ -285,67 +352,6 @@ impl KeyRing for MacOsKeyRing {
         };
 
         Ok(out)
-    }
-
-    fn peek_secret<S: AsRef<str>>(id: S) -> Result<Vec<(String, KeyRingSecret)>> {
-        let id = id.as_ref();
-        if id.is_empty() {
-            return MacOsKeyRing::_find_all_passwords();
-        }
-
-        let search_criteria = parse_peek_criteria(id);
-
-        if search_criteria.contains_key("kind") {
-            return match search_criteria["kind"].as_str() {
-                "generic" => {
-                    if can_find_generic(&search_criteria) {
-                        let res = MacOsKeyRing::_find_generic_password(&search_criteria)?;
-                        Ok(vec![(id.to_string(), res)])
-                    } else {
-                        Err("Missing required criteria. 'service' and 'account' must both be supplied".into())
-                    }
-                }
-                "internet" => {
-                    if can_find_internet(&search_criteria) {
-                        let res = MacOsKeyRing::_find_internet_password(&search_criteria)?;
-                        Ok(vec![(id.to_string(), res)])
-                    } else {
-                        Err("Missing required criteria. 'server', 'account', 'path', 'protocol', 'authentication_type' must all be supplied".into())
-                    }
-                }
-                _ => Err("Unknown kind provided".into()),
-            };
-        }
-        if can_find_internet(&search_criteria) {
-            let res = MacOsKeyRing::_find_internet_password(&search_criteria)?;
-            Ok(vec![(id.to_string(), res)])
-        } else if can_find_generic(&search_criteria) {
-            let res = MacOsKeyRing::_find_generic_password(&search_criteria)?;
-            Ok(vec![(id.to_string(), res)])
-        } else {
-            Err("Can't determine which secret kind to search. 'account' and 'service' or 'account' and 'server', 'path', 'protocol', 'authentication_type' must be supplied".into())
-        }
-    }
-
-    fn set_secret<S: AsRef<str>, B: AsRef<[u8]>>(&mut self, id: S, secret: B) -> Result<()> {
-        self.unlock()?;
-        self.keychain
-            .set_generic_password(
-                &self.service,
-                &self.get_target_name(id.as_ref()),
-                secret.as_ref(),
-            )
-            .map_err(|e| e.into())
-    }
-
-    fn delete_secret<S: AsRef<str>>(&mut self, id: S) -> Result<()> {
-        self.unlock()?;
-        let (_, item) = self
-            .keychain
-            .find_generic_password(&self.service, &self.get_target_name(id.as_ref()))
-            .map_err(KeyRingError::from)?;
-        item.delete();
-        Ok(())
     }
 }
 
