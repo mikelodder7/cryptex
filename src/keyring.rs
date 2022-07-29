@@ -41,7 +41,7 @@ pub fn get_os_keyring(service: &str) -> Result<OsKeyRing> {
 
 #[cfg(target_os = "linux")]
 #[cfg_attr(docsrs, doc(cfg(target_os = "linux")))]
-pub fn get_os_keyring<'a>(service: &str) -> Result<OsKeyRing<'a>> {
+pub fn get_os_keyring(service: &str) -> Result<OsKeyRing<'_>> {
     OsKeyRing::new(service)
 }
 
