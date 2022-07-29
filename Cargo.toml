@@ -6,7 +6,7 @@ description = """
 Cryptex uses system keyrings to store and retrieve secrets
 """
 documentation = "https://docs.rs/cryptex/"
-license = "Apache-2.0 or MIT"
+license = "MIT/Apache-2.0"
 repository = "https://github.com/mikelodder7/cryptex"
 homepage = "https://github.com/mikelodder7/cryptex"
 readme = "README.md"
