@@ -164,32 +164,28 @@ impl MacOsKeyRing {
     }
 }
 
-impl KeyRing for MacOsKeyRing {
-    fn get_secret<S: AsRef<str>>(&mut self, id: S) -> Result<KeyRingSecret> {
+impl DynKeyRing for MacOsKeyRing {
+    fn get_secret(&mut self, id: &str) -> Result<KeyRingSecret> {
         self.unlock()?;
         let (pass, _) = self
             .keychain
-            .find_generic_password(&self.service, &self.get_target_name(id.as_ref()))
+            .find_generic_password(&self.service, &self.get_target_name(id))
             .map_err(KeyRingError::from)?;
         Ok(KeyRingSecret(pass.to_owned()))
     }
 
-    fn set_secret<S: AsRef<str>, B: AsRef<[u8]>>(&mut self, id: S, secret: B) -> Result<()> {
+    fn set_secret(&mut self, id: &str, secret: &[u8]) -> Result<()> {
         self.unlock()?;
         self.keychain
-            .set_generic_password(
-                &self.service,
-                &self.get_target_name(id.as_ref()),
-                secret.as_ref(),
-            )
+            .set_generic_password(&self.service, &self.get_target_name(id), secret)
             .map_err(|e| e.into())
     }
 
-    fn delete_secret<S: AsRef<str>>(&mut self, id: S) -> Result<()> {
+    fn delete_secret(&mut self, id: &str) -> Result<()> {
         self.unlock()?;
         let (_, item) = self
             .keychain
-            .find_generic_password(&self.service, &self.get_target_name(id.as_ref()))
+            .find_generic_password(&self.service, &self.get_target_name(id))
             .map_err(KeyRingError::from)?;
         item.delete();
         Ok(())

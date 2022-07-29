@@ -50,9 +50,8 @@ impl WindowsOsKeyRing {
     }
 }
 
-impl KeyRing for WindowsOsKeyRing {
-    fn get_secret<S: AsRef<str>>(&mut self, id: S) -> Result<KeyRingSecret> {
-        let id = id.as_ref();
+impl DynKeyRing for WindowsOsKeyRing {
+    fn get_secret(&mut self, id: &str) -> Result<KeyRingSecret> {
         let mut target_name = self.get_target_name(id);
         let mut pcredential: PCREDENTIALW = std::ptr::null_mut();
 
@@ -106,9 +105,7 @@ impl KeyRing for WindowsOsKeyRing {
         res.map_err(|s| KeyRingError::from(s))
     }
 
-    fn set_secret<S: AsRef<str>, B: AsRef<[u8]>>(&mut self, id: S, secret: B) -> Result<()> {
-        let id = id.as_ref();
-        let secret = secret.as_ref();
+    fn set_secret(&mut self, id: &str, secret: &[u8]) -> Result<()> {
         let mut target_name = self.get_target_name(id);
         let mut empty = to_utf16_bytes("");
         let attributes: PCREDENTIAL_ATTRIBUTEW = std::ptr::null_mut();
@@ -170,8 +167,8 @@ impl KeyRing for WindowsOsKeyRing {
         res
     }
 
-    fn delete_secret<S: AsRef<str>>(&mut self, id: S) -> Result<()> {
-        let target_name = self.get_target_name(id.as_ref());
+    fn delete_secret(&mut self, id: &str) -> Result<()> {
+        let target_name = self.get_target_name(id);
 
         match unsafe { CredDeleteW(target_name.as_ptr(), CRED_TYPE_GENERIC, 0) } {
             0 => WindowsOsKeyRing::handle_err::<()>(),
