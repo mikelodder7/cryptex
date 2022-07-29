@@ -17,6 +17,7 @@ use serde::{
 };
 use zeroize::Zeroize;
 
+/// Represents a value stored in the keyring
 #[derive(Zeroize)]
 #[zeroize(drop)]
 pub struct KeyRingSecret(pub Vec<u8>);

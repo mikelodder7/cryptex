@@ -33,12 +33,14 @@ pub use keyringsecret::*;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use users::{get_current_username, get_effective_username};
 
+/// Return the OS keyring if available
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 #[cfg_attr(docsrs, doc(cfg(any(target_os = "macos", target_os = "windows"))))]
 pub fn get_os_keyring(service: &str) -> Result<OsKeyRing> {
     OsKeyRing::new(service)
 }
 
+/// Return the OS keyring if available
 #[cfg(target_os = "linux")]
 #[cfg_attr(docsrs, doc(cfg(target_os = "linux")))]
 pub fn get_os_keyring(service: &str) -> Result<OsKeyRing<'_>> {
@@ -78,7 +80,8 @@ pub trait KeyRing: Send + Sync {
     fn delete_secret<S: AsRef<str>>(&mut self, id: S) -> Result<()>;
 }
 
-/// Modification of [`KeyRing`] trait suitable for trait Objects
+/// Modification of [`KeyRing`] trait suitable for trait Objects. Implementers
+/// should use this trait and [`KeyRing`] will be implemented automatically
 pub trait DynKeyRing: Send + Sync {
     fn get_secret(&mut self, id: &str) -> Result<KeyRingSecret>;
 
