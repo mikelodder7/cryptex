@@ -76,9 +76,8 @@ impl From<LinuxOsError> for KeyRingError {
             LinuxOsError::Crypto(_)
             | LinuxOsError::Zbus(_)
             | LinuxOsError::ZbusFdo(_)
-            | LinuxOsError::ZbusMsg(_)
             | LinuxOsError::Zvariant(_)
-            | LinuxOsError::Parse
+            | LinuxOsError::Unavailable
             | LinuxOsError::Prompt => KeyRingError::GeneralError {
                 msg: format!("{:?}", e.to_string()),
             },
@@ -86,6 +85,7 @@ impl From<LinuxOsError> for KeyRingError {
                 msg: format!("{:?}", e.to_string()),
             },
             LinuxOsError::NoResult => KeyRingError::ItemNotFound,
+            _ => KeyRingError::GeneralError { msg: format!("Unknown error") }
         }
     }
 }
