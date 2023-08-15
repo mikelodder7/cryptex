@@ -77,7 +77,6 @@ impl From<LinuxOsError> for KeyRingError {
             | LinuxOsError::Zbus(_)
             | LinuxOsError::ZbusFdo(_)
             | LinuxOsError::Zvariant(_)
-            | LinuxOsError::Unavailable
             | LinuxOsError::Prompt => KeyRingError::GeneralError {
                 msg: format!("{:?}", e.to_string()),
             },

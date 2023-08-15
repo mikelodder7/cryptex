@@ -36,10 +36,7 @@ fn main() {
         .author("Michael Lodder")
         .about("Lox is a platform independent program for storing and retrieving information from secure enclaves or keyrings");
     if allows_file() {
-        temp = temp
-        .arg(Arg::with_name("FILE")
-            .takes_value(false)
-        );
+        temp = temp.arg(Arg::with_name("FILE").takes_value(false));
     }
 
     let matches = temp

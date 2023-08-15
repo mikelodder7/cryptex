@@ -56,13 +56,13 @@ impl NewKeyRing for SqlCipherKeyring {
     fn new<S: AsRef<str>>(lock_key: S) -> Result<Self> {
         let params = Argon2Params::new(
             #[cfg(test)]
-                {
-                    Argon2Params::DEFAULT_M_COST
-                },
+            {
+                Argon2Params::DEFAULT_M_COST
+            },
             #[cfg(not(test))]
-                {
-                    1_9917_824 // 19456 KiB converted to bytes
-                },
+            {
+                1_9917_824 // 19456 KiB converted to bytes
+            },
             Argon2Params::DEFAULT_T_COST,
             Argon2Params::DEFAULT_P_COST,
             Some(Argon2Params::DEFAULT_OUTPUT_LEN),
@@ -130,7 +130,7 @@ fn make_hidden(_path: &PathBuf) {}
 
 #[cfg(test)]
 mod tests {
-    use super::{SqlCipherKeyring, get_keyring_file};
+    use super::{get_keyring_file, SqlCipherKeyring};
     use crate::{KeyRing, NewKeyRing};
     use std::fs;
 
