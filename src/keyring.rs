@@ -9,6 +9,8 @@ mod keyringsecret;
 pub mod linux;
 #[cfg(target_os = "macos")]
 pub mod macos;
+#[cfg(feature = "file")]
+pub mod sqlcipher;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
@@ -69,6 +71,16 @@ fn get_username() -> String {
         },
         None => get_current_user(),
     }
+}
+
+#[cfg(feature = "file")]
+pub const fn allows_file() -> bool {
+    true
+}
+
+#[cfg(not(feature = "file"))]
+pub const fn allows_file() -> bool {
+    false
 }
 
 /// A trait for all key rings

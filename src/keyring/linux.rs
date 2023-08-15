@@ -25,14 +25,20 @@ static RUNTIME: RwLock<Option<Runtime>> = RwLock::new(None);
 
 impl<'a> DynKeyRing for LinuxOsKeyRing<'a> {
     fn get_secret(&mut self, id: &str) -> Result<KeyRingSecret> {
-        let opt_runtime = RUNTIME.read()
-            .map_err(|_e| KeyRingError::GeneralError { msg: "unable to find runtime".to_string() })?;
+        let opt_runtime = RUNTIME.read().map_err(|_e| KeyRingError::GeneralError {
+            msg: "unable to find runtime".to_string(),
+        })?;
         if opt_runtime.is_none() {
-            return Err(KeyRingError::GeneralError { msg: "unable to find runtime".to_string() });
+            return Err(KeyRingError::GeneralError {
+                msg: "unable to find runtime".to_string(),
+            });
         }
         let runtime = opt_runtime.as_ref().unwrap();
         runtime.block_on(async move {
-            let collection = self.keychain.get_default_collection().await
+            let collection = self
+                .keychain
+                .get_default_collection()
+                .await
                 .map_err(KeyRingError::from)?;
             if collection.is_locked().await.map_err(KeyRingError::from)? {
                 collection.unlock().await.map_err(KeyRingError::from)?
@@ -54,10 +60,13 @@ impl<'a> DynKeyRing for LinuxOsKeyRing<'a> {
     }
 
     fn set_secret(&mut self, id: &str, secret: &[u8]) -> Result<()> {
-        let opt_runtime = RUNTIME.read()
-            .map_err(|_e| KeyRingError::GeneralError { msg: "unable to find runtime".to_string() })?;
+        let opt_runtime = RUNTIME.read().map_err(|_e| KeyRingError::GeneralError {
+            msg: "unable to find runtime".to_string(),
+        })?;
         if opt_runtime.is_none() {
-            return Err(KeyRingError::GeneralError { msg: "unable to find runtime".to_string() });
+            return Err(KeyRingError::GeneralError {
+                msg: "unable to find runtime".to_string(),
+            });
         }
         let runtime = opt_runtime.as_ref().unwrap();
         runtime.block_on(async move {
@@ -67,8 +76,8 @@ impl<'a> DynKeyRing for LinuxOsKeyRing<'a> {
                 .await
                 .map_err(KeyRingError::from)?;
             if collection.is_locked().await.map_err(KeyRingError::from)? {
-                                                                       collection.unlock().await.map_err(KeyRingError::from)?
-                                                                       }
+                collection.unlock().await.map_err(KeyRingError::from)?
+            }
             let attributes = maplit::hashmap![
                 "application" => "lox",
                 "service" => &self.service,
@@ -90,10 +99,13 @@ impl<'a> DynKeyRing for LinuxOsKeyRing<'a> {
     }
 
     fn delete_secret(&mut self, id: &str) -> Result<()> {
-        let opt_runtime = RUNTIME.read()
-            .map_err(|_e| KeyRingError::GeneralError { msg: "unable to find runtime".to_string() })?;
+        let opt_runtime = RUNTIME.read().map_err(|_e| KeyRingError::GeneralError {
+            msg: "unable to find runtime".to_string(),
+        })?;
         if opt_runtime.is_none() {
-            return Err(KeyRingError::GeneralError { msg: "unable to find runtime".to_string() });
+            return Err(KeyRingError::GeneralError {
+                msg: "unable to find runtime".to_string(),
+            });
         }
         let runtime = opt_runtime.as_ref().unwrap();
         runtime.block_on(async move {
@@ -126,9 +138,8 @@ impl<'a> DynKeyRing for LinuxOsKeyRing<'a> {
 impl<'a> NewKeyRing for LinuxOsKeyRing<'a> {
     fn new<S: AsRef<str>>(service: S) -> Result<Self> {
         let runtime = Runtime::new().unwrap();
-        let keychain_result = runtime.block_on(async move {
-            SecretService::connect(EncryptionType::Dh).await
-        });
+        let keychain_result =
+            runtime.block_on(async move { SecretService::connect(EncryptionType::Dh).await });
         *RUNTIME.write().unwrap() = Some(runtime);
         Ok(LinuxOsKeyRing {
             keychain: keychain_result.map_err(KeyRingError::from)?,
@@ -143,7 +154,9 @@ impl<'a> PeekableKeyRing for LinuxOsKeyRing<'a> {
         let runtime = Runtime::new().unwrap();
         let id = id.as_ref();
         runtime.block_on(async move {
-            let key_chain = SecretService::connect(EncryptionType::Dh).await.map_err(KeyRingError::from)?;
+            let key_chain = SecretService::connect(EncryptionType::Dh)
+                .await
+                .map_err(KeyRingError::from)?;
             let collection = key_chain
                 .get_default_collection()
                 .await
@@ -153,7 +166,10 @@ impl<'a> PeekableKeyRing for LinuxOsKeyRing<'a> {
             }
             let attributes = parse_peek_criteria(id);
 
-            let items = collection.get_all_items().await.map_err(KeyRingError::from)?;
+            let items = collection
+                .get_all_items()
+                .await
+                .map_err(KeyRingError::from)?;
             let mut out = Vec::new();
 
             for item in &items {
@@ -194,7 +210,9 @@ impl<'a> ListKeyRing for LinuxOsKeyRing<'a> {
     fn list_secrets() -> Result<Vec<BTreeMap<String, String>>> {
         let runtime = Runtime::new().unwrap();
         runtime.block_on(async move {
-            let key_chain = SecretService::connect(EncryptionType::Dh).await.map_err(KeyRingError::from)?;
+            let key_chain = SecretService::connect(EncryptionType::Dh)
+                .await
+                .map_err(KeyRingError::from)?;
             let collection = key_chain
                 .get_default_collection()
                 .await
@@ -202,7 +220,10 @@ impl<'a> ListKeyRing for LinuxOsKeyRing<'a> {
             if collection.is_locked().await.map_err(KeyRingError::from)? {
                 collection.unlock().await.map_err(KeyRingError::from)?
             }
-            let items = collection.get_all_items().await.map_err(KeyRingError::from)?;
+            let items = collection
+                .get_all_items()
+                .await
+                .map_err(KeyRingError::from)?;
             let mut out = Vec::new();
             for item in &items {
                 match item.get_attributes().await {

@@ -13,7 +13,7 @@
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 use colored::Colorize;
-use cryptex::{get_os_keyring, KeyRing, KeyRingSecret, ListKeyRing, PeekableKeyRing};
+use cryptex::{allows_file, get_os_keyring, KeyRing, KeyRingSecret, ListKeyRing, PeekableKeyRing};
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
@@ -31,10 +31,18 @@ use cryptex::linux::LinuxOsKeyRing as OsKeyRing;
 use cryptex::keyring::windows::WindowsOsKeyRing as OsKeyRing;
 
 fn main() {
-    let matches = App::new("Lox")
+    let mut temp = App::new("Cryptex")
         .version("0.1")
         .author("Michael Lodder")
-        .about("Lox is a platform independent program for storing and retrieving information from secure enclaves or keyrings")
+        .about("Lox is a platform independent program for storing and retrieving information from secure enclaves or keyrings");
+    if allows_file() {
+        temp = temp
+        .arg(Arg::with_name("FILE")
+            .takes_value(false)
+        );
+    }
+
+    let matches = temp
         .subcommand(SubCommand::with_name("get")
             .about("Retrieve a secret identified by ID. If no ID is specified or ID is '-', input is received from STDIN")
             .arg(Arg::with_name("SERVICE")

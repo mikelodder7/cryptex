@@ -85,7 +85,19 @@ impl From<LinuxOsError> for KeyRingError {
                 msg: format!("{:?}", e.to_string()),
             },
             LinuxOsError::NoResult => KeyRingError::ItemNotFound,
-            _ => KeyRingError::GeneralError { msg: format!("Unknown error") }
+            _ => KeyRingError::GeneralError {
+                msg: format!("Unknown error"),
+            },
+        }
+    }
+}
+
+#[cfg(feature = "file")]
+#[cfg_attr(docsrs, doc(cfg(feature = "file")))]
+impl From<rusqlite::Error> for KeyRingError {
+    fn from(value: rusqlite::Error) -> Self {
+        KeyRingError::GeneralError {
+            msg: value.to_string(),
         }
     }
 }
