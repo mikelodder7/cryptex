@@ -154,7 +154,7 @@ fn set(matches: &ArgMatches) {
     let mut secret = read_input(matches, "SECRET", true);
 
     keyring
-        .set_secret(&id, &secret)
+        .set_secret(id, &secret)
         .unwrap_or_else(|e| die::<()>(&format!("Failed: {}", e)));
     secret.zeroize();
     println!("{}", "Success".green());

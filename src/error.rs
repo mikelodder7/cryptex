@@ -85,7 +85,7 @@ impl From<LinuxOsError> for KeyRingError {
             },
             LinuxOsError::NoResult => KeyRingError::ItemNotFound,
             _ => KeyRingError::GeneralError {
-                msg: format!("Unknown error"),
+                msg: "Unknown error".to_string(),
             },
         }
     }
