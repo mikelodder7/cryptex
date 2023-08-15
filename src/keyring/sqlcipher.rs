@@ -81,8 +81,7 @@ impl NewKeyRing for SqlCipherKeyring {
             .expect("Cannot set memory sanitization");
         conn.query_row("SELECT COUNT(*) FROM `sqlite_master`;", params![], |_row| {
             Ok(())
-        })
-        .expect("Keyring key was incorrect");
+        })?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS secrets (id TEXT UNIQUE NOT NULL, value TEXT NOT NULL)",
             (),
@@ -163,6 +162,10 @@ mod tests {
             let res = keyring.get_secret("test_key2");
             assert!(res.is_ok());
             assert_eq!(res.unwrap().0, b"bonuskey");
+        }
+        {
+            let res_keyring = SqlCipherKeyring::new("bad_password");
+            assert!(res_keyring.is_err());
         }
         {
             let file = get_keyring_file();
