@@ -8,10 +8,10 @@ Applications use several credentials today to secure data locally and during tra
 However, bad habits happen when safeguarding these credentials. For example, when creating an API token for Amazon's AWS, Amazon generates
 a secret key on a user's behalf and is downloaded to a CSV file. Programmers do not know how to best
 sure these downloaded credentials because they must be used in a program to make API calls.
-They don't which of the following is the best option. They can:
+They don't know which of the following is the best option:
 
 - Put these credentials directly in the program like most do as constant variables but this is a terrible option because attackers can analyze the code and extract it.
-- Use environment variables. If so, should it passed as at the command level or put in a global variable registry? Both are susceptible to sniffing memory or process information.
+- Use environment variables. If so, should it be passed as at the command level or put in a global variable registry? Both are susceptible to sniffing memory or process information.
 - Read a config file that contains the credentials but must rely on the security of the operating system to manage access control.
 - Use secure enclaves to store the credentials but this just shifts to another problem as secure enclaves rely on yet another set of credentials to ensure the application has the correct authorization. These come as hardware security modules (HSM) or trusted execution environments (TEE)
 - Require interaction with a user or group to supply the credential for each use or cache it for a period of time. This is usually done with passwords, pins, cyber tokens, and biometrics.
@@ -41,6 +41,14 @@ Currently Mac OS X offers support for a [CLI tool](https://www.netmeister.org/bl
 
 *Cryptex* is written in Rust and has no external dependencies to do its job except DBus on linux.
 
+*Cryptex* also allows for using [SQLCipher](https://www.zetetic.net/sqlcipher/) instead of keyring via the `feature=file`. 
+You can check if SQLCipher is enabled by running the function `allows_file()`.
+This approach uses two inputs to create the encryption key: a user selected password, and random system generated data.
+Similar to how databases use connection strings, this library employs a connection string to indicate the values as well.
+The connection string syntax is `password=<password> salt=<hex encoded salt value>`. This value is hashed using Argon2id
+and thus the memory, threads, and degree of parallelism can also be set as part of the string
+`memory=<integer> threads=<integer> parallel=<integer>`.
+
 The program can be compiled from any OS to run on any OS. Cryptex-CLI is the command line tool while Cryptex is the library.
 
 Eventually, additional cryptographic services will be added like hardware-based HSMs or TPMs or TEEs or software-based like
@@ -54,6 +62,22 @@ Eventually, additional cryptographic services will be added like hardware-based 
 with the goal of having a standardized security interface. The challenge with additional services is each
 one has varying threat models, expectations, requirements, assumptions, and specifications around operations and parameters.
 *Cryptex* aims to be the main abstraction layer to manage these.
+
+## Using as a library
+This crate enables running as a rust library.
+
+```rust
+use cryptex::{get_os_keyring, KeyRing};
+
+let mut keyring = get_os_keyring();
+keyring.set_secret("test_key", b"secret")?;
+
+// Retrieve secret later
+let secret = keyring.get_secret("test_key")?;
+
+// Remove the secret from the keyring
+keyring.delete_secret("test_key");
+```
 
 ## Run the program
 
@@ -87,6 +111,8 @@ to retrieve targeted secrets. However, this is better than the secrets existing 
 ## Examples 
 *Cryptex* takes at least two arguments: service_name and ID.
 When storing a secret, an additional parameter is needed. If omitted (the preferred method) the value is read from STDIN.
+
+In the case of using SQLCipher, the service_name is the connection string to be used
 
 ### Storing a secret
 ```bash
