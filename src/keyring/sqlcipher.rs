@@ -7,7 +7,7 @@ use argon2::{Algorithm, Argon2, Params as Argon2Params, Version};
 use rusqlite::{params, Connection};
 
 use crate::error::KeyRingError;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{fs, iter};
 use zeroize::Zeroize;
@@ -57,11 +57,18 @@ impl DynKeyRing for SqlCipherKeyring {
 
 impl NewKeyRing for SqlCipherKeyring {
     fn new<S: AsRef<str>>(lock_key: S) -> Result<Self> {
-        let connection = lock_key.as_ref().parse::<ConnectionString>()?;
+        let connection = lock_key.as_ref().parse::<ConnectionParams>()?;
+        Self::with_params(&connection)
+    }
+}
+
+impl SqlCipherKeyring {
+    /// Create a new keyring with the connection params
+    pub fn with_params(connection: &ConnectionParams) -> Result<Self> {
         let params = Argon2Params::new(
-            connection.m_cost,
-            connection.t_cost,
-            connection.p_cost,
+            connection.memory,
+            connection.threads,
+            connection.parallel,
             Some(Argon2Params::DEFAULT_OUTPUT_LEN),
         )
         .unwrap();
@@ -98,10 +105,8 @@ fn get_keyring_file() -> PathBuf {
     path.push(format!(".{}", env!("CARGO_PKG_NAME")));
 
     if !path.is_dir() {
-        fs::create_dir_all(&path).expect(&format!(
-            "Unable to create folder: {}",
-            path.to_str().unwrap()
-        ));
+        fs::create_dir_all(&path)
+            .unwrap_or_else(|_| panic!("Unable to create folder: {}", path.to_str().unwrap()));
     }
     make_hidden(&path);
     path.push("keyring.db3");
@@ -109,7 +114,7 @@ fn get_keyring_file() -> PathBuf {
 }
 
 #[cfg(target_os = "windows")]
-fn make_hidden(path: &PathBuf) {
+fn make_hidden(path: &Path) {
     use std::ffi::CString;
     unsafe {
         let file_name = path.to_str().unwrap();
@@ -121,45 +126,61 @@ fn make_hidden(path: &PathBuf) {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn make_hidden(_path: &PathBuf) {}
+fn make_hidden(_path: &Path) {}
 
+/// The connection params for SqlCipherKeyRing
+///
+/// [`ConnectionParams`] supports passing the values as a string
+/// similar to postgres.
+///
+/// ```
+/// use cryptex::sqlcipher::ConnectionParams;
+///
+/// let params = "password=1qaz2wsx3edc4rfv salt=0okm9ijn8uhb7ygv".parse::<ConnectionParams>().unwrap();
+/// ```
+///
+/// or with extra parameters
+///
+/// ```
+/// use cryptex::sqlcipher::ConnectionParams;
+///
+/// let params = "password=1qaz2wsx3edc4rfv salt=0okm9ijn8uhb7ygv memory=19917824 threads=2 parallel=1".parse::<ConnectionParams>().unwrap();
+/// ```
 #[derive(Zeroize)]
-struct ConnectionString {
-    password: Vec<u8>,
-    salt: Vec<u8>,
-    m_cost: u32,
-    t_cost: u32,
-    p_cost: u32,
+pub struct ConnectionParams {
+    /// The password to use to open the keyring
+    pub password: Vec<u8>,
+    /// The salt to use when hashing the password
+    pub salt: Vec<u8>,
+    /// The memory requirement
+    pub memory: u32,
+    /// The number of iterations or threads requirement
+    pub threads: u32,
+    /// The parallel requirement
+    pub parallel: u32,
 }
 
-impl Default for ConnectionString {
+impl Default for ConnectionParams {
     fn default() -> Self {
-        let m_cost = #[cfg(test)]
-        {
-            Argon2Params::DEFAULT_M_COST
-        };
-        #[cfg(not(test))]
-        {
-            1_9917_824 // 19456 KiB converted to bytes
-        };
+        let m_cost = get_default_memory_cost();
         Self {
             password: vec![],
             salt: vec![],
-            m_cost,
-            t_cost: Argon2Params::DEFAULT_T_COST,
-            p_cost: Argon2Params::DEFAULT_P_COST,
+            memory: m_cost,
+            threads: Argon2Params::DEFAULT_T_COST,
+            parallel: Argon2Params::DEFAULT_P_COST,
         }
     }
 }
 
-impl Drop for ConnectionString {
+impl Drop for ConnectionParams {
     fn drop(&mut self) {
         self.password.zeroize();
         self.salt.zeroize();
     }
 }
 
-impl FromStr for ConnectionString {
+impl FromStr for ConnectionParams {
     type Err = KeyRingError;
 
     fn from_str(s: &str) -> Result<Self> {
@@ -167,7 +188,7 @@ impl FromStr for ConnectionString {
     }
 }
 
-impl ConnectionString {
+impl ConnectionParams {
     fn param(&mut self, key: &str, value: &str) -> Result<()> {
         match key {
             "password" => self.password = value.as_bytes().to_vec(),
@@ -178,7 +199,7 @@ impl ConnectionString {
                     .map_err(|e| KeyRingError::GeneralError {
                         msg: format!("expected an integer for memory: {}", e.to_string()),
                     })?;
-                if m_cost < Argon2Params::DEFAULT_M_COST || m_cost > Argon2Params::MAX_M_COST {
+                if !(Argon2Params::DEFAULT_M_COST..Argon2Params::MAX_M_COST).contains(&m_cost) {
                     return Err(KeyRingError::GeneralError {
                         msg: format!(
                             "invalid value for memory must be between {} and {}",
@@ -187,7 +208,7 @@ impl ConnectionString {
                         ),
                     });
                 }
-                self.m_cost = m_cost;
+                self.memory = m_cost;
             }
             "threads" => {
                 let t_cost = value
@@ -195,7 +216,7 @@ impl ConnectionString {
                     .map_err(|e| KeyRingError::GeneralError {
                         msg: format!("expected an integer for threads: {}", e.to_string()),
                     })?;
-                if t_cost < Argon2Params::DEFAULT_T_COST || t_cost > Argon2Params::MAX_T_COST {
+                if !(Argon2Params::DEFAULT_T_COST..Argon2Params::MAX_T_COST).contains(&t_cost) {
                     return Err(KeyRingError::GeneralError {
                         msg: format!(
                             "invalid value for threads must be between {} and {}",
@@ -204,7 +225,7 @@ impl ConnectionString {
                         ),
                     });
                 }
-                self.t_cost = t_cost;
+                self.threads = t_cost;
             }
             "parallel" => {
                 let p_cost = value
@@ -215,7 +236,7 @@ impl ConnectionString {
                             e.to_string()
                         ),
                     })?;
-                if p_cost < Argon2Params::DEFAULT_P_COST || t_cost > Argon2Params::MAX_P_COST {
+                if !(Argon2Params::DEFAULT_P_COST..Argon2Params::MAX_P_COST).contains(&p_cost) {
                     return Err(KeyRingError::GeneralError {
                         msg: format!(
                             "invalid value for degree of parallelism must be between {} and {}",
@@ -224,7 +245,7 @@ impl ConnectionString {
                         ),
                     });
                 }
-                self.p_cost = p_cost;
+                self.parallel = p_cost;
             }
             _ => {
                 return Err(KeyRingError::GeneralError {
@@ -234,6 +255,46 @@ impl ConnectionString {
         };
         Ok(())
     }
+
+    /// Set the password
+    pub fn password(&mut self, password: &[u8]) -> &mut Self {
+        self.password = password.to_vec();
+        self
+    }
+
+    /// Set the salt
+    pub fn salt(&mut self, salt: &[u8]) -> &mut Self {
+        self.salt = salt.to_vec();
+        self
+    }
+
+    /// Set the memory cost
+    pub fn memory(&mut self, cost: u32) -> &mut Self {
+        self.memory = cost;
+        self
+    }
+
+    /// Set the time cost
+    pub fn time(&mut self, cost: u32) -> &mut Self {
+        self.threads = cost;
+        self
+    }
+
+    /// Set the parallel cost
+    pub fn parallel(&mut self, cost: u32) -> &mut Self {
+        self.parallel = cost;
+        self
+    }
+}
+
+#[cfg(test)]
+fn get_default_memory_cost() -> u32 {
+    Argon2Params::DEFAULT_M_COST
+}
+
+#[cfg(not(test))]
+fn get_default_memory_cost() -> u32 {
+    19_917_824 // 19456 KiB converted to bytes
 }
 
 struct Parser<'a> {
@@ -242,13 +303,13 @@ struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    fn parse(s: &'a str) -> Result<ConnectionString> {
+    fn parse(s: &'a str) -> Result<ConnectionParams> {
         let mut parser = Parser {
             s,
             it: s.char_indices().peekable(),
         };
 
-        let mut connection_string = ConnectionString::default();
+        let mut connection_string = ConnectionParams::default();
 
         while let Some((key, value)) = parser.parameter()? {
             connection_string.param(key, &value)?;

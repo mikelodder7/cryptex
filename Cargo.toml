@@ -1,18 +1,19 @@
 [package]
 name = "cryptex"
-version = "1.5.0"
 authors = ["Michael Lodder <redmike7@gmail.com>"]
+categories = []
 description = """
 Cryptex uses system keyrings to store and retrieve secrets
+or a local file
 """
 documentation = "https://docs.rs/cryptex/"
+edition = "2021"
+homepage = "https://github.com/mikelodder7/cryptex"
+keywords = ["secrets", "vault", "keyring"]
 license = "MIT/Apache-2.0"
 repository = "https://github.com/mikelodder7/cryptex"
-homepage = "https://github.com/mikelodder7/cryptex"
 readme = "README.md"
-categories = []
-keywords = ["secrets", "vault", "keyring"]
-edition = "2021"
+version = "1.6.0"
 
 [lib]
 crate-type = ["staticlib", "rlib", "cdylib"]
