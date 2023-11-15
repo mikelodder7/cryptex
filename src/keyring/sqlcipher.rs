@@ -65,20 +65,25 @@ impl NewKeyRing for SqlCipherKeyring {
 impl SqlCipherKeyring {
     /// Create a new keyring with the connection params
     pub fn with_params(connection: &ConnectionParams, path: Option<PathBuf>) -> Result<Self> {
-        let params = Argon2Params::new(
-            connection.memory,
-            connection.threads,
-            connection.parallel,
-            Some(Argon2Params::DEFAULT_OUTPUT_LEN),
-        )
-        .unwrap();
-        let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-        let mut okm = [0u8; 32];
-        argon2
-            .hash_password_into(&connection.password, &connection.salt, &mut okm)
+        let key = if connection.key.is_empty() {
+            let params = Argon2Params::new(
+                connection.memory,
+                connection.threads,
+                connection.parallel,
+                Some(Argon2Params::DEFAULT_OUTPUT_LEN),
+            )
             .unwrap();
+            let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+            let mut okm = [0u8; 32];
+            argon2
+                .hash_password_into(&connection.password, &connection.salt, &mut okm)
+                .unwrap();
+            okm.to_vec()
+        } else {
+            connection.key.to_vec()
+        };
         let conn = Connection::open(get_keyring_file(path)).expect("Unable to open keyring file");
-        conn.pragma_update(None, "key", hex::encode(okm))
+        conn.pragma_update(None, "key", hex::encode(&key))
             .expect("Unable to set keyring key");
         conn.pragma_update(None, "cipher_memory_security", "ON")
             .expect("Cannot set memory sanitization");
@@ -90,7 +95,6 @@ impl SqlCipherKeyring {
             (),
         )
         .expect("Unable to create keyring table");
-
         Ok(Self { conn })
     }
 }
@@ -154,6 +158,9 @@ fn make_hidden(_path: &Path) {}
 /// ```
 #[derive(Zeroize)]
 pub struct ConnectionParams {
+    /// The key used to open the keyring. This is used mutually exclusive
+    /// with password and salt
+    pub key: Vec<u8>,
     /// The password to use to open the keyring
     pub password: Vec<u8>,
     /// The salt to use when hashing the password
@@ -170,6 +177,7 @@ impl Default for ConnectionParams {
     fn default() -> Self {
         let m_cost = get_default_memory_cost();
         Self {
+            key: vec![],
             password: vec![],
             salt: vec![],
             memory: m_cost,
@@ -181,6 +189,7 @@ impl Default for ConnectionParams {
 
 impl Drop for ConnectionParams {
     fn drop(&mut self) {
+        self.key.zeroize();
         self.password.zeroize();
         self.salt.zeroize();
     }
@@ -197,6 +206,7 @@ impl FromStr for ConnectionParams {
 impl ConnectionParams {
     fn param(&mut self, key: &str, value: &str) -> Result<()> {
         match key {
+            "key" => self.key = hex::decode(value).unwrap(),
             "password" => self.password = value.as_bytes().to_vec(),
             "salt" => self.salt = value.as_bytes().to_vec(),
             "memory" => {
@@ -260,6 +270,12 @@ impl ConnectionParams {
             }
         };
         Ok(())
+    }
+
+    /// Set the key
+    pub fn key(&mut self, key: &[u8]) -> &mut Self {
+        self.key = key.to_vec();
+        self
     }
 
     /// Set the password
