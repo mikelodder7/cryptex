@@ -58,13 +58,13 @@ impl DynKeyRing for SqlCipherKeyring {
 impl NewKeyRing for SqlCipherKeyring {
     fn new<S: AsRef<str>>(lock_key: S) -> Result<Self> {
         let connection = lock_key.as_ref().parse::<ConnectionParams>()?;
-        Self::with_params(&connection)
+        Self::with_params(&connection, None)
     }
 }
 
 impl SqlCipherKeyring {
     /// Create a new keyring with the connection params
-    pub fn with_params(connection: &ConnectionParams) -> Result<Self> {
+    pub fn with_params(connection: &ConnectionParams, path: Option<PathBuf>) -> Result<Self> {
         let params = Argon2Params::new(
             connection.memory,
             connection.threads,
@@ -77,7 +77,7 @@ impl SqlCipherKeyring {
         argon2
             .hash_password_into(&connection.password, &connection.salt, &mut okm)
             .unwrap();
-        let conn = Connection::open(get_keyring_file()).expect("Unable to open keyring file");
+        let conn = Connection::open(get_keyring_file(path)).expect("Unable to open keyring file");
         conn.pragma_update(None, "key", hex::encode(okm))
             .expect("Unable to set keyring key");
         conn.pragma_update(None, "cipher_memory_security", "ON")
@@ -95,14 +95,20 @@ impl SqlCipherKeyring {
     }
 }
 
-fn get_keyring_file() -> PathBuf {
-    let mut path = dirs::home_dir().unwrap_or_else(|| {
-        dirs::document_dir().unwrap_or_else(|| {
-            dirs::data_local_dir()
-                .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR").to_string()))
-        })
-    });
-    path.push(format!(".{}", env!("CARGO_PKG_NAME")));
+fn get_keyring_file(in_path: Option<PathBuf>) -> PathBuf {
+    let mut path = match in_path {
+        None => {
+            let mut path = dirs::home_dir().unwrap_or_else(|| {
+                dirs::document_dir().unwrap_or_else(|| {
+                    dirs::data_local_dir()
+                        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR").to_string()))
+                })
+            });
+            path.push(format!(".{}", env!("CARGO_PKG_NAME")));
+            path
+        }
+        Some(path) => path,
+    };
 
     if !path.is_dir() {
         fs::create_dir_all(&path)
