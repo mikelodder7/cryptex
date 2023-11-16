@@ -166,7 +166,6 @@ impl MacOsKeyRing {
 
 impl DynKeyRing for MacOsKeyRing {
     fn get_secret(&mut self, id: &str) -> Result<KeyRingSecret> {
-        self.unlock()?;
         let (pass, _) = self
             .keychain
             .find_generic_password(&self.service, &self.get_target_name(id))
@@ -175,14 +174,12 @@ impl DynKeyRing for MacOsKeyRing {
     }
 
     fn set_secret(&mut self, id: &str, secret: &[u8]) -> Result<()> {
-        self.unlock()?;
         self.keychain
             .set_generic_password(&self.service, &self.get_target_name(id), secret)
             .map_err(|e| e.into())
     }
 
     fn delete_secret(&mut self, id: &str) -> Result<()> {
-        self.unlock()?;
         let (_, item) = self
             .keychain
             .find_generic_password(&self.service, &self.get_target_name(id))
@@ -194,10 +191,12 @@ impl DynKeyRing for MacOsKeyRing {
 
 impl NewKeyRing for MacOsKeyRing {
     fn new<S: AsRef<str>>(service: S) -> Result<Self> {
-        Ok(MacOsKeyRing {
+        let mut keyring = MacOsKeyRing {
             keychain: SecKeychain::default().map_err(KeyRingError::from)?,
             service: service.as_ref().to_string(),
-        })
+        };
+        keyring.unlock()?;
+        Ok(keyring)
     }
 }
 
