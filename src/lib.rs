@@ -15,6 +15,7 @@ mod keyring;
 
 pub use keyring::*;
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[cfg(test)]
 mod test {
     use super::*;

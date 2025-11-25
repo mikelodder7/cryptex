@@ -28,7 +28,7 @@ use cryptex::macos::MacOsKeyRing as OsKeyRing;
 use cryptex::linux::LinuxOsKeyRing as OsKeyRing;
 
 #[cfg(target_os = "windows")]
-use cryptex::keyring::windows::WindowsOsKeyRing as OsKeyRing;
+use cryptex::windows::WindowsOsKeyRing as OsKeyRing;
 
 fn main() {
     let mut temp = App::new("Cryptex")
