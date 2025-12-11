@@ -190,7 +190,7 @@ cryptex.exe peek IEUser:aws:apikey
 ```
 
 ## Build from source
-[build-from-source]: # build-from-source
+[build-from-source]: #build-from-source
 
 To make a distributable executable, run the following commands:
 
