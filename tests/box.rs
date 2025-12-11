@@ -1,4 +1,4 @@
-use cryptex::{get_os_keyring, DynKeyRing};
+use cryptex::{DynKeyRing, get_os_keyring};
 
 #[test]
 fn put_in_box() {

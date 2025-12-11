@@ -4,7 +4,7 @@
 */
 use security_framework::os::macos::keychain::*;
 use security_framework::os::macos::passwords::{
-    find_generic_password, find_internet_password, SecAuthenticationType, SecProtocolType,
+    SecAuthenticationType, SecProtocolType, find_generic_password, find_internet_password,
 };
 use security_framework_sys::item::{
     kSecClass,
@@ -19,18 +19,18 @@ use security_framework_sys::item::{
 use security_framework_sys::keychain_item::SecItemCopyMatching;
 
 use core_foundation::dictionary::{
-    kCFTypeDictionaryKeyCallBacks, kCFTypeDictionaryValueCallBacks, CFDictionary,
-    CFDictionaryCreateMutable, CFDictionarySetValue, CFMutableDictionaryRef,
+    CFDictionary, CFDictionaryCreateMutable, CFDictionarySetValue, CFMutableDictionaryRef,
+    kCFTypeDictionaryKeyCallBacks, kCFTypeDictionaryValueCallBacks,
 };
 
 use core_foundation::array::CFArray;
 use core_foundation::base::{
-    kCFAllocatorDefault,
     //                            TCFType,
     CFRelease,
     CFType,
     CFTypeRef,
     FromVoid,
+    kCFAllocatorDefault,
 };
 use core_foundation::boolean::kCFBooleanTrue;
 use core_foundation::number::CFNumber;

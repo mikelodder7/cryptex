@@ -13,14 +13,14 @@ use winapi::ctypes::c_void;
 use crate::error::KeyRingError;
 use std::collections::BTreeMap;
 use winapi::shared::minwindef::FILETIME;
-use winapi::shared::winerror::{ERROR_INVALID_FLAGS, ERROR_NOT_FOUND, ERROR_NO_SUCH_LOGON_SESSION};
+use winapi::shared::winerror::{ERROR_INVALID_FLAGS, ERROR_NO_SUCH_LOGON_SESSION, ERROR_NOT_FOUND};
 use winapi::um::dpapi::{CryptProtectData, CryptUnprotectData};
 use winapi::um::errhandlingapi::GetLastError;
 use winapi::um::winbase::LocalFree;
 use winapi::um::wincred::{
-    CredDeleteW, CredEnumerateW, CredFree, CredReadW, CredWriteW, CREDENTIALW,
-    CRED_ENUMERATE_ALL_CREDENTIALS, CRED_PERSIST_ENTERPRISE, CRED_TYPE_GENERIC, PCREDENTIALW,
-    PCREDENTIAL_ATTRIBUTEW,
+    CRED_ENUMERATE_ALL_CREDENTIALS, CRED_PERSIST_ENTERPRISE, CRED_TYPE_GENERIC, CREDENTIALW,
+    CredDeleteW, CredEnumerateW, CredFree, CredReadW, CredWriteW, PCREDENTIAL_ATTRIBUTEW,
+    PCREDENTIALW,
 };
 use winapi::um::wincrypt::{CRYPTOAPI_BLOB, PDATA_BLOB};
 use zeroize::Zeroize;
@@ -42,10 +42,16 @@ impl WindowsOsKeyRing {
 
     fn handle_err<T>() -> Result<T> {
         match unsafe { GetLastError() } {
-            ERROR_NOT_FOUND => Err(KeyRingError::from("The specified item could not be found in the keychain.")),
-            ERROR_NO_SUCH_LOGON_SESSION => Err(KeyRingError::from("The logon session does not exist or there is no credential set associated with this logon session.")),
-            ERROR_INVALID_FLAGS => Err(KeyRingError::from("A flag that is not valid was specified for the Flags parameter, or CRED_ENUMERATE_ALL_CREDENTIALS is specified for the Flags parameter and the Filter parameter is not NULL.")),
-            _ => Err(KeyRingError::from("Windows Vault Error."))
+            ERROR_NOT_FOUND => Err(KeyRingError::from(
+                "The specified item could not be found in the keychain.",
+            )),
+            ERROR_NO_SUCH_LOGON_SESSION => Err(KeyRingError::from(
+                "The logon session does not exist or there is no credential set associated with this logon session.",
+            )),
+            ERROR_INVALID_FLAGS => Err(KeyRingError::from(
+                "A flag that is not valid was specified for the Flags parameter, or CRED_ENUMERATE_ALL_CREDENTIALS is specified for the Flags parameter and the Filter parameter is not NULL.",
+            )),
+            _ => Err(KeyRingError::from("Windows Vault Error.")),
         }
     }
 }

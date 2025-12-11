@@ -12,8 +12,8 @@ use subtle::ConstantTimeEq;
 use crate::error::KeyRingError;
 #[cfg(feature = "serde")]
 use serde::{
-    de::{Error as DError, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
+    de::{Error as DError, Visitor},
 };
 use zeroize::Zeroize;
 

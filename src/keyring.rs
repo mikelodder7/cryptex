@@ -56,19 +56,13 @@ compile_error!("no keyring implementation is available for this platform");
 fn get_username() -> String {
     fn get_current_user() -> String {
         match get_current_username() {
-            Some(s) => match s.into_string() {
-                Ok(r) => r,
-                Err(_) => whoami::username(),
-            },
+            Some(s) => s.into_string().unwrap_or_else(|_| whoami::username()),
             None => whoami::username(),
         }
     }
 
     match get_effective_username() {
-        Some(s) => match s.into_string() {
-            Ok(r) => r,
-            Err(_) => get_current_user(),
-        },
+        Some(s) => s.into_string().unwrap_or_else(|_| get_current_user()),
         None => get_current_user(),
     }
 }

@@ -4,7 +4,7 @@
 */
 use super::*;
 use argon2::{Algorithm, Argon2, Params as Argon2Params, Version};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use crate::error::KeyRingError;
 use std::path::{Path, PathBuf};
@@ -213,7 +213,7 @@ impl ConnectionParams {
                 let m_cost = value
                     .parse::<u32>()
                     .map_err(|e| KeyRingError::GeneralError {
-                        msg: format!("expected an integer for memory: {}", e.to_string()),
+                        msg: format!("expected an integer for memory: {}", e),
                     })?;
                 if !(Argon2Params::DEFAULT_M_COST..Argon2Params::MAX_M_COST).contains(&m_cost) {
                     return Err(KeyRingError::GeneralError {
@@ -230,7 +230,7 @@ impl ConnectionParams {
                 let t_cost = value
                     .parse::<u32>()
                     .map_err(|e| KeyRingError::GeneralError {
-                        msg: format!("expected an integer for threads: {}", e.to_string()),
+                        msg: format!("expected an integer for threads: {}", e),
                     })?;
                 if !(Argon2Params::DEFAULT_T_COST..Argon2Params::MAX_T_COST).contains(&t_cost) {
                     return Err(KeyRingError::GeneralError {
@@ -247,10 +247,7 @@ impl ConnectionParams {
                 let p_cost = value
                     .parse::<u32>()
                     .map_err(|e| KeyRingError::GeneralError {
-                        msg: format!(
-                            "expected an integer for degree of parallelism: {}",
-                            e.to_string()
-                        ),
+                        msg: format!("expected an integer for degree of parallelism: {}", e),
                     })?;
                 if !(Argon2Params::DEFAULT_P_COST..Argon2Params::MAX_P_COST).contains(&p_cost) {
                     return Err(KeyRingError::GeneralError {
@@ -266,7 +263,7 @@ impl ConnectionParams {
             _ => {
                 return Err(KeyRingError::GeneralError {
                     msg: format!("unknown parameter: {}", key),
-                })
+                });
             }
         };
         Ok(())
@@ -395,11 +392,7 @@ impl<'a> Parser<'a> {
             _ => true,
         });
 
-        if s.is_empty() {
-            None
-        } else {
-            Some(s)
-        }
+        if s.is_empty() { None } else { Some(s) }
     }
 
     fn value(&mut self) -> Result<String> {
@@ -481,14 +474,14 @@ impl<'a> Parser<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{get_keyring_file, SqlCipherKeyring};
+    use super::{SqlCipherKeyring, get_keyring_file};
     use crate::{KeyRing, NewKeyRing};
     use std::fs;
 
     #[test]
     fn works() {
         {
-            let file = get_keyring_file();
+            let file = get_keyring_file(None);
             let _ = fs::remove_dir_all(file);
         }
         {
@@ -523,7 +516,7 @@ mod tests {
             assert!(res_keyring.is_err());
         }
         {
-            let file = get_keyring_file();
+            let file = get_keyring_file(None);
             let _ = fs::remove_dir_all(file);
         }
     }

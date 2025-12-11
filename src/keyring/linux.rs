@@ -37,7 +37,7 @@ impl<'a> DynKeyRing for LinuxOsKeyRing<'a> {
         let search = collection
             .search_items(attributes)
             .map_err(KeyRingError::from)?;
-        let item = search.get(0).ok_or(KeyRingError::ItemNotFound)?;
+        let item = search.first().ok_or(KeyRingError::ItemNotFound)?;
         let secret = item.get_secret().map_err(KeyRingError::from)?;
         Ok(KeyRingSecret(secret))
     }
@@ -86,7 +86,7 @@ impl<'a> DynKeyRing for LinuxOsKeyRing<'a> {
             .search_items(attributes)
             .map_err(KeyRingError::from)?;
         let item = search
-            .get(0)
+            .first()
             .ok_or_else(|| KeyRingError::from("No secret found"))?;
         item.delete().map_err(KeyRingError::from)
     }

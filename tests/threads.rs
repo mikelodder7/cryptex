@@ -1,4 +1,4 @@
-use cryptex::{get_os_keyring, KeyRing};
+use cryptex::{KeyRing, get_os_keyring};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn thread_test() {

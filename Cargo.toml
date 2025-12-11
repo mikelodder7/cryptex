@@ -7,13 +7,13 @@ Cryptex uses system keyrings to store and retrieve secrets
 or a local file
 """
 documentation = "https://docs.rs/cryptex/"
-edition = "2021"
+edition = "2024"
 homepage = "https://github.com/mikelodder7/cryptex"
 keywords = ["secrets", "vault", "keyring"]
 license = "MIT/Apache-2.0"
 repository = "https://github.com/mikelodder7/cryptex"
 readme = "README.md"
-version = "1.9.0"
+version = "1.10.0"
 
 [lib]
 crate-type = ["staticlib", "rlib", "cdylib"]
@@ -30,18 +30,16 @@ atty = "0.2"
 clap = "2.33"
 colored = "3.0"
 hex = "0.4"
-rand = "0.8"
 rpassword = "7"
 serde = { version = "1", optional = true }
 subtle = "2"
-whoami = "1.1"
+whoami = "1.6"
 zeroize = { version = "1", features = ["zeroize_derive"] }
 
 argon2 = { version = "0.5", optional = true }
 chacha20poly1305 = { version = "0.10", optional = true }
 dirs = { version = "6.0", optional = true }
-merlin = { version = "3", optional = true }
-rusqlite = { version = "0.33", features = ["bundled-sqlcipher-vendored-openssl"], optional = true }
+rusqlite = { version = "0.37", features = ["bundled-sqlcipher-vendored-openssl"], optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
@@ -61,5 +59,4 @@ secret-service = "2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "0.3", features = ["dpapi", "errhandlingapi", "wincred", "winerror"] }
-byteorder = "1.4"
-
+byteorder = "1.5"
