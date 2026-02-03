@@ -7,6 +7,7 @@
 use cryptex::{KeyRing, get_os_keyring};
 
 #[test]
+#[ignore = "requires a running OS keyring service"]
 fn thread_test() {
     let handle = std::thread::spawn(|| {
         let res = get_os_keyring("cryptex_text");

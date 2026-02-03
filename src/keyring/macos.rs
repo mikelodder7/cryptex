@@ -10,10 +10,8 @@ use security_framework_sys::item::{
     kSecClass,
     kSecClassGenericPassword,
     kSecClassInternetPassword,
-    //                                   kSecClassKey,
-    //                                   kSecClassCertificate,
-    //                                   kSecClassIdentity
     kSecMatchLimit,
+    kSecMatchLimitAll,
     kSecReturnAttributes,
 };
 use security_framework_sys::keychain_item::SecItemCopyMatching;
@@ -24,30 +22,16 @@ use core_foundation::dictionary::{
 };
 
 use core_foundation::array::CFArray;
-use core_foundation::base::{
-    //                            TCFType,
-    CFRelease,
-    CFType,
-    CFTypeRef,
-    FromVoid,
-    kCFAllocatorDefault,
-};
+use core_foundation::base::{CFRelease, CFType, CFTypeRef, FromVoid, kCFAllocatorDefault};
 use core_foundation::boolean::kCFBooleanTrue;
 use core_foundation::number::CFNumber;
 use core_foundation::string::CFString;
-
-use core_foundation_sys::string::CFStringRef;
 
 use std::ffi::c_void;
 
 use super::*;
 use crate::error::KeyRingError;
 use std::collections::BTreeMap;
-use std::string::ToString;
-
-extern "C" {
-    pub static kSecMatchLimitAll: CFStringRef;
-}
 
 pub struct MacOsKeyRing {
     keychain: SecKeychain,

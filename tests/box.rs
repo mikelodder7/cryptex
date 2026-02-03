@@ -7,6 +7,7 @@
 use cryptex::{DynKeyRing, get_os_keyring};
 
 #[test]
+#[ignore = "requires a running OS keyring service"]
 fn put_in_box() {
     let mut keyring: Box<dyn DynKeyRing> =
         Box::new(get_os_keyring("cryptex_put_in_box_test").unwrap());
