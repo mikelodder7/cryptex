@@ -11,7 +11,7 @@
     trivial_numeric_casts
 )]
 
-use clap::{App, Arg, ArgMatches, SubCommand};
+use clap::{Arg, ArgAction, ArgMatches, Command};
 use colored::Colorize;
 use cryptex::allows_file;
 
@@ -38,7 +38,7 @@ use std::fs::File;
     all(target_os = "windows", feature = "windows-credentials"),
     all(target_os = "linux", feature = "linux-secret-service"),
 ))]
-use std::io::{self, Read, Write};
+use std::io::{self, IsTerminal, Read, Write};
 #[cfg(any(
     all(target_os = "macos", feature = "macos-keychain"),
     all(target_os = "windows", feature = "windows-credentials"),
@@ -62,56 +62,56 @@ use cryptex::linux::LinuxOsKeyRing as OsKeyRing;
 use cryptex::windows::WindowsOsKeyRing as OsKeyRing;
 
 fn main() {
-    let mut temp = App::new("Cryptex")
+    let mut temp = Command::new("Cryptex")
         .version("0.1")
         .author("Michael Lodder")
         .about("Lox is a platform independent program for storing and retrieving information from secure enclaves or keyrings");
     if allows_file() {
-        temp = temp.arg(Arg::with_name("FILE").takes_value(false));
+        temp = temp.arg(Arg::new("FILE").action(ArgAction::SetTrue));
     }
 
     let matches = temp
-        .subcommand(SubCommand::with_name("get")
+        .subcommand(Command::new("get")
             .about("Retrieve a secret identified by ID. If no ID is specified or ID is '-', input is received from STDIN")
-            .arg(Arg::with_name("SERVICE")
+            .arg(Arg::new("SERVICE")
                 .help("The service name to use for associating with this secret. The reason a service name is required is if no service name is specified, the default name would be the current calling process name. This sort of behavior has been known to lead to privilege escalation when used incorrectly so it is preferred to specify a service name.")
                 .required(true)
                 .index(1))
-            .arg(Arg::with_name("ID")
+            .arg(Arg::new("ID")
                 .help("The ID to retrieve. If no ID is specified or ID is '-', input is received from STDIN")
                 .required(false)
                 .index(2)))
-        .subcommand(SubCommand::with_name("set")
+        .subcommand(Command::new("set")
             .about("Save a secret identified by ID. If no ID is specified or ID is '-', input is received from STDIN")
-            .arg(Arg::with_name("SERVICE")
+            .arg(Arg::new("SERVICE")
                 .help("The service name to use for associating with this secret. The reason a service name is required is if no service name is specified, the default name would be the current calling process name. This sort of behavior has been known to lead to privilege escalation when used incorrectly so it is preferred to specify a service name.")
                 .required(true)
                 .index(1))
-            .arg(Arg::with_name("ID")
+            .arg(Arg::new("ID")
                 .help("The ID to retrieve.")
                 .required(true)
                 .index(2))
-            .arg(Arg::with_name("SECRET")
+            .arg(Arg::new("SECRET")
                 .help("The SECRET to be saved. If no SECRET is specified, input is received from STDIN")
                 .required(false)
                 .index(3)))
-        .subcommand(SubCommand::with_name("delete")
+        .subcommand(Command::new("delete")
             .about("Delete a secret identified by ID. If no ID is specified or ID is '-', input is received from STDIN")
-            .arg(Arg::with_name("SERVICE")
+            .arg(Arg::new("SERVICE")
                 .help("The service name to use for associating with this secret. The reason a service name is required is if no service name is specified, the default name would be the current calling process name. This sort of behavior has been known to lead to privilege escalation when used incorrectly so it is preferred to specify a service name. Use the keyword 'kind' to designate which type of secret to look for on OSX. 'kind' can be either internet or generic. If 'kind' is not specified, Lox will try whichever type can be searched based on the other criteria provided")
                 .required(true)
                 .index(1))
-            .arg(Arg::with_name("ID")
+            .arg(Arg::new("ID")
                 .help("The ID to retrieve. If no ID is specified or ID is '-', input is received from STDIN")
                 .required(false)
                 .index(2)))
-        .subcommand(SubCommand::with_name("peek")
+        .subcommand(Command::new("peek")
             .about("Look up a secret identified by ID that is not managed by Lox. If no ID is specified or ID is '-', input is received from STDIN")
-            .arg(Arg::with_name("ID")
+            .arg(Arg::new("ID")
                 .help("The ID to retrieve. If no ID is specified or ID is '-', input is received from STDIN. The ID if formatted by using name-value pairs comma separated. For example, if you wanted to peek at any ID in the keyring with two attributes service and account, it would look like service=lox,account=api. Lox returns any items that it finds matching the search criteria")
                 .required(false)
                 .index(1)))
-        .subcommand(SubCommand::with_name("list")
+        .subcommand(Command::new("list")
             .about("List all the secret names in the keychain.")
         ).get_matches();
 
@@ -226,7 +226,7 @@ fn delete(matches: &ArgMatches) {
 ))]
 fn set(matches: &ArgMatches) {
     let mut keyring = get_keyring(matches);
-    let id = matches.value_of("ID").unwrap();
+    let id = matches.get_one::<String>("ID").map(|s| s.as_str()).unwrap();
     let mut secret = read_input(matches, "SECRET", true);
 
     keyring
@@ -253,8 +253,11 @@ fn get_id(matches: &ArgMatches, read_stdin: bool) -> String {
 }
 
 #[cfg(all(target_os = "linux", feature = "linux-secret-service"))]
-fn get_keyring<'a>(matches: &'a ArgMatches) -> OsKeyRing<'a> {
-    let service = matches.value_of("SERVICE").unwrap();
+fn get_keyring(matches: &ArgMatches) -> OsKeyRing<'_> {
+    let service = matches
+        .get_one::<String>("SERVICE")
+        .map(|s| s.as_str())
+        .unwrap();
     match get_os_keyring(service) {
         Ok(keyring) => keyring,
         Err(e) => die::<OsKeyRing>(&format!("Unable to get OS keyring: {}", e)),
@@ -266,7 +269,10 @@ fn get_keyring<'a>(matches: &'a ArgMatches) -> OsKeyRing<'a> {
     all(target_os = "windows", feature = "windows-credentials"),
 ))]
 fn get_keyring(matches: &ArgMatches) -> OsKeyRing {
-    let service = matches.value_of("SERVICE").unwrap();
+    let service = matches
+        .get_one::<String>("SERVICE")
+        .map(|s| s.as_str())
+        .unwrap();
     match get_os_keyring(service) {
         Ok(keyring) => keyring,
         Err(e) => die::<OsKeyRing>(&format!("Unable to get OS keyring: {}", e)),
@@ -279,7 +285,7 @@ fn get_keyring(matches: &ArgMatches) -> OsKeyRing {
     all(target_os = "linux", feature = "linux-secret-service"),
 ))]
 fn read_input(matches: &ArgMatches, name: &str, read_stdin: bool) -> Vec<u8> {
-    match matches.value_of(name) {
+    match matches.get_one::<String>(name).map(|s| s.as_str()) {
         Some(text) => match get_file(text) {
             Some(file) => match File::open(file.as_path()) {
                 Ok(mut f) => read_stream(&mut f),
@@ -290,7 +296,7 @@ fn read_input(matches: &ArgMatches, name: &str, read_stdin: bool) -> Vec<u8> {
             None => text.as_bytes().to_vec(),
         },
         None => {
-            if atty::is(atty::Stream::Stdin) {
+            if io::stdin().is_terminal() {
                 if read_stdin {
                     rpassword::prompt_password("Enter Secret: ")
                         .unwrap()

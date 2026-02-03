@@ -42,7 +42,7 @@ pub use keyringsecret::*;
     all(target_os = "linux", feature = "linux-secret-service"),
     all(target_os = "macos", feature = "macos-keychain"),
 ))]
-use users::{get_current_username, get_effective_username};
+use uzers::{get_current_username, get_effective_username};
 
 /// Return the OS keyring if available
 #[cfg(any(
@@ -83,10 +83,14 @@ compile_error!("no keyring implementation is selected or available for this plat
     all(target_os = "macos", feature = "macos-keychain"),
 ))]
 fn get_username() -> String {
+    fn fallback_username() -> String {
+        whoami::username().unwrap_or_else(|_| String::from("unknown"))
+    }
+
     fn get_current_user() -> String {
         match get_current_username() {
-            Some(s) => s.into_string().unwrap_or_else(|_| whoami::username()),
-            None => whoami::username(),
+            Some(s) => s.into_string().unwrap_or_else(|_| fallback_username()),
+            None => fallback_username(),
         }
     }
 

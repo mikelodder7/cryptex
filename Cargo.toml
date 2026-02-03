@@ -13,7 +13,7 @@ keywords = ["secrets", "vault", "keyring"]
 license = "MIT/Apache-2.0"
 repository = "https://github.com/mikelodder7/cryptex"
 readme = "README.md"
-version = "1.11.0"
+version = "2.0.0"
 
 [lib]
 crate-type = ["staticlib", "rlib", "cdylib"]
@@ -24,28 +24,27 @@ name = "cryptex"
 [features]
 default = ["linux-secret-service", "macos-keychain", "windows-credentials"]
 file = ["argon2", "chacha20poly1305", "dirs", "rusqlite"]
-linux-secret-service = ["secret-service", "users"]
-macos-keychain = ["security-framework", "security-framework-sys", "core-foundation", "core-foundation-sys", "users"]
-windows-credentials = ["winapi", "byteorder"]
+linux-secret-service = ["secret-service", "uzers"]
+macos-keychain = ["security-framework", "security-framework-sys", "core-foundation", "core-foundation-sys", "uzers"]
+windows-credentials = ["windows"]
 
 [dependencies]
-atty = "0.2"
-clap = "2.33"
+clap = "4"
 colored = "3.0"
 hex = "0.4"
 rpassword = "7"
 serde = { version = "1", optional = true }
 subtle = "2"
-whoami = "1.6"
+whoami = "2"
 zeroize = { version = "1", features = ["zeroize_derive"] }
 
 argon2 = { version = "0.5", optional = true }
 chacha20poly1305 = { version = "0.10", optional = true }
 dirs = { version = "6.0", optional = true }
-rusqlite = { version = "0.37", features = ["bundled-sqlcipher-vendored-openssl"], optional = true }
+rusqlite = { version = "0.38", features = ["bundled-sqlcipher-vendored-openssl"], optional = true }
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
-users = { version = "0.11", optional = true }
+uzers = { version = "0.12", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = { version = "3", optional = true }
@@ -57,5 +56,10 @@ core-foundation-sys = { version = "0.8.7", optional = true }
 secret-service = { version = "5", features = ["rt-tokio-crypto-rust"], optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-winapi = { version = "0.3", features = ["dpapi", "errhandlingapi", "wincred", "winerror"], optional = true }
-byteorder = { version = "1.5", optional = true }
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Security_Credentials",
+    "Win32_Security_Cryptography",
+    "Win32_Storage_FileSystem",
+], optional = true }
+

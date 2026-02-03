@@ -3,26 +3,22 @@
     SPDX-License-Identifier: Apache-2.0
 */
 use super::*;
-use byteorder::{ByteOrder, LittleEndian};
-use std::ffi::{OsStr, OsString};
+use std::ffi::{OsStr, OsString, c_void};
 use std::iter::once;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 
-use winapi::ctypes::c_void;
-
 use crate::error::KeyRingError;
 use std::collections::BTreeMap;
-use winapi::shared::minwindef::FILETIME;
-use winapi::shared::winerror::{ERROR_INVALID_FLAGS, ERROR_NO_SUCH_LOGON_SESSION, ERROR_NOT_FOUND};
-use winapi::um::dpapi::{CryptProtectData, CryptUnprotectData};
-use winapi::um::errhandlingapi::GetLastError;
-use winapi::um::winbase::LocalFree;
-use winapi::um::wincred::{
-    CRED_ENUMERATE_ALL_CREDENTIALS, CRED_PERSIST_ENTERPRISE, CRED_TYPE_GENERIC, CREDENTIALW,
-    CredDeleteW, CredEnumerateW, CredFree, CredReadW, CredWriteW, PCREDENTIAL_ATTRIBUTEW,
-    PCREDENTIALW,
+use windows::Win32::Foundation::{FILETIME, HLOCAL, LocalFree};
+use windows::Win32::Security::Credentials::{
+    CRED_ENUMERATE_ALL_CREDENTIALS, CRED_FLAGS, CRED_PERSIST_ENTERPRISE, CRED_TYPE_GENERIC,
+    CREDENTIAL_ATTRIBUTEW, CREDENTIALW, CredDeleteW, CredEnumerateW, CredFree, CredReadW,
+    CredWriteW,
 };
-use winapi::um::wincrypt::{CRYPTOAPI_BLOB, PDATA_BLOB};
+use windows::Win32::Security::Cryptography::{
+    CRYPT_INTEGER_BLOB, CryptProtectData, CryptUnprotectData,
+};
+use windows::core::{PCWSTR, PWSTR};
 use zeroize::Zeroize;
 
 pub struct WindowsOsKeyRing {
@@ -40,64 +36,43 @@ impl WindowsOsKeyRing {
         to_utf16_bytes(&target_name)
     }
 
-    fn handle_err<T>() -> Result<T> {
-        match unsafe { GetLastError() } {
-            ERROR_NOT_FOUND => Err(KeyRingError::from(
-                "The specified item could not be found in the keychain.",
-            )),
-            ERROR_NO_SUCH_LOGON_SESSION => Err(KeyRingError::from(
-                "The logon session does not exist or there is no credential set associated with this logon session.",
-            )),
-            ERROR_INVALID_FLAGS => Err(KeyRingError::from(
-                "A flag that is not valid was specified for the Flags parameter, or CRED_ENUMERATE_ALL_CREDENTIALS is specified for the Flags parameter and the Filter parameter is not NULL.",
-            )),
-            _ => Err(KeyRingError::from("Windows Vault Error.")),
-        }
+    fn handle_err<T>(err: windows::core::Error) -> Result<T> {
+        Err(KeyRingError::from(err.message().to_string_lossy()))
     }
 }
 
 impl DynKeyRing for WindowsOsKeyRing {
     fn get_secret(&mut self, id: &str) -> Result<KeyRingSecret> {
-        let mut target_name = self.get_target_name(id);
-        let mut pcredential: PCREDENTIALW = std::ptr::null_mut();
+        let target_name = self.get_target_name(id);
+        let mut pcredential: *mut CREDENTIALW = std::ptr::null_mut();
 
-        let cred_type = CRED_TYPE_GENERIC;
-        let res = unsafe { CredReadW(target_name.as_ptr(), cred_type, 0, &mut pcredential) };
-
-        if res == 0 {
-            return WindowsOsKeyRing::handle_err::<KeyRingSecret>();
+        unsafe {
+            CredReadW(
+                PCWSTR(target_name.as_ptr()),
+                CRED_TYPE_GENERIC.0,
+                0,
+                &mut pcredential,
+            )
         }
+        .map_err(|e| KeyRingError::from(e.message().to_string_lossy()))?;
 
         let credential: CREDENTIALW = unsafe { *pcredential };
 
-        let mut in_blob = CRYPTOAPI_BLOB {
+        let mut in_blob = CRYPT_INTEGER_BLOB {
             cbData: credential.CredentialBlobSize,
             pbData: credential.CredentialBlob,
         };
-        let in_blob_ptr: PDATA_BLOB = &mut in_blob;
 
-        let mut out_blob = CRYPTOAPI_BLOB {
+        let mut out_blob = CRYPT_INTEGER_BLOB {
             cbData: 0,
             pbData: std::ptr::null_mut(),
         };
-        let out_blob_ptr: PDATA_BLOB = &mut out_blob;
-
-        let descr = &mut target_name.as_mut_ptr();
 
         let res = match unsafe {
-            CryptUnprotectData(
-                in_blob_ptr,
-                descr,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                0,
-                out_blob_ptr,
-            )
+            CryptUnprotectData(&mut in_blob, None, None, None, None, 0, &mut out_blob)
         } {
-            0 => Err(KeyRingError::from("Windows Crypt Unprotect Data Error")),
-            _ => {
-                //TODO: figure out how to zero pbData after its loaded into the KeyRingSecret
+            Err(_) => Err(KeyRingError::from("Windows Crypt Unprotect Data Error")),
+            Ok(()) => {
                 let secret = unsafe {
                     std::slice::from_raw_parts_mut(out_blob.pbData, out_blob.cbData as usize)
                 };
@@ -106,80 +81,73 @@ impl DynKeyRing for WindowsOsKeyRing {
                 r
             }
         };
-        unsafe { CredFree(pcredential as *mut c_void) };
-        unsafe { LocalFree(out_blob.pbData as *mut c_void) };
+        unsafe { CredFree(Some(pcredential as *const c_void)) };
+        unsafe { LocalFree(Some(HLOCAL(out_blob.pbData as _))) };
         res
     }
 
     fn set_secret(&mut self, id: &str, secret: &[u8]) -> Result<()> {
         let mut target_name = self.get_target_name(id);
         let mut empty = to_utf16_bytes("");
-        let attributes: PCREDENTIAL_ATTRIBUTEW = std::ptr::null_mut();
+        let attributes: *mut CREDENTIAL_ATTRIBUTEW = std::ptr::null_mut();
         let mut user_name = to_utf16_bytes(&self.username);
-        let persist = CRED_PERSIST_ENTERPRISE;
         let mut secret_cp = secret.to_vec();
 
-        let mut in_blob = CRYPTOAPI_BLOB {
+        let mut in_blob = CRYPT_INTEGER_BLOB {
             cbData: secret.len() as u32,
             pbData: secret_cp.as_mut_ptr(),
         };
-        let in_blob_ptr: PDATA_BLOB = &mut in_blob;
-        let mut out_blob = CRYPTOAPI_BLOB {
+        let mut out_blob = CRYPT_INTEGER_BLOB {
             cbData: 0,
             pbData: std::ptr::null_mut(),
         };
-        let out_blob_ptr: PDATA_BLOB = &mut out_blob;
 
-        let res = unsafe {
+        unsafe {
             CryptProtectData(
-                in_blob_ptr,
-                target_name.as_mut_ptr(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
+                &mut in_blob,
+                PCWSTR(target_name.as_ptr()),
+                None,
+                None,
+                None,
                 0,
-                out_blob_ptr,
+                &mut out_blob,
             )
-        };
-        if res == 0 {
-            return Err(KeyRingError::from("Windows Crypt Protect Data Error"));
         }
+        .map_err(|_| KeyRingError::from("Windows Crypt Protect Data Error"))?;
 
         secret_cp.zeroize();
 
         let mut credential = CREDENTIALW {
-            Flags: 0,
-            Type: CRED_TYPE_GENERIC,
-            TargetName: target_name.as_mut_ptr(),
-            Comment: empty.as_mut_ptr(),
+            Flags: CRED_FLAGS(0),
+            Type: CRED_TYPE_GENERIC.0,
+            TargetName: PWSTR(target_name.as_mut_ptr()),
+            Comment: PWSTR(empty.as_mut_ptr()),
             LastWritten: FILETIME {
                 dwHighDateTime: 0,
                 dwLowDateTime: 0,
             },
             CredentialBlobSize: out_blob.cbData,
             CredentialBlob: out_blob.pbData,
-            Persist: persist,
+            Persist: CRED_PERSIST_ENTERPRISE.0,
             Attributes: attributes,
             AttributeCount: 0,
-            TargetAlias: empty.as_mut_ptr(),
-            UserName: user_name.as_mut_ptr(),
+            TargetAlias: PWSTR(empty.as_mut_ptr()),
+            UserName: PWSTR(user_name.as_mut_ptr()),
         };
-        let pcredential: PCREDENTIALW = &mut credential;
-        let res = match unsafe { CredWriteW(pcredential, 0) } {
-            0 => Err(KeyRingError::from("Windows Vault Error")),
-            _ => Ok(()),
+        let res = match unsafe { CredWriteW(&mut credential, 0) } {
+            Err(_) => Err(KeyRingError::from("Windows Vault Error")),
+            Ok(()) => Ok(()),
         };
-        unsafe { LocalFree(out_blob.pbData as *mut c_void) };
+        unsafe { LocalFree(Some(HLOCAL(out_blob.pbData as _))) };
         res
     }
 
     fn delete_secret(&mut self, id: &str) -> Result<()> {
         let target_name = self.get_target_name(id);
 
-        match unsafe { CredDeleteW(target_name.as_ptr(), CRED_TYPE_GENERIC, 0) } {
-            0 => WindowsOsKeyRing::handle_err::<()>(),
-            _ => Ok(()),
-        }
+        unsafe { CredDeleteW(PCWSTR(target_name.as_ptr()), CRED_TYPE_GENERIC.0, 0) }
+            .map_err(|e| KeyRingError::from(e.message().to_string_lossy()))?;
+        Ok(())
     }
 }
 
@@ -187,7 +155,7 @@ impl NewKeyRing for WindowsOsKeyRing {
     fn new<S: AsRef<str>>(service: S) -> Result<Self> {
         Ok(WindowsOsKeyRing {
             service: service.as_ref().to_string(),
-            username: whoami::username(),
+            username: whoami::username().unwrap_or_else(|_| String::from("unknown")),
         })
     }
 }
@@ -209,35 +177,32 @@ impl PeekableKeyRing for WindowsOsKeyRing {
 
 impl ListKeyRing for WindowsOsKeyRing {
     fn list_secrets() -> Result<Vec<BTreeMap<String, String>>> {
-        let filter = std::ptr::null();
         let flags = CRED_ENUMERATE_ALL_CREDENTIALS;
-        let mut pcredentials: *mut PCREDENTIALW = std::ptr::null_mut();
+        let mut pcredentials: *mut *mut CREDENTIALW = std::ptr::null_mut();
         let mut count = 0;
 
-        let res = unsafe { CredEnumerateW(filter, flags, &mut count, &mut pcredentials) };
-        if res == 0 {
-            return WindowsOsKeyRing::handle_err::<Vec<BTreeMap<String, String>>>();
-        }
+        unsafe { CredEnumerateW(PCWSTR::null(), flags, &mut count, &mut pcredentials) }
+            .map_err(|e| KeyRingError::from(e.message().to_string_lossy()))?;
 
-        let credentials: &[PCREDENTIALW] =
-            unsafe { std::slice::from_raw_parts_mut(pcredentials, count as usize) };
+        let credentials: &[*mut CREDENTIALW] =
+            unsafe { std::slice::from_raw_parts(pcredentials, count as usize) };
 
         let mut found_credentials = Vec::new();
 
         for c in credentials {
             let cred: CREDENTIALW = unsafe { **c };
             let mut i = 0isize;
-            while unsafe { *cred.TargetName.offset(i) } != 0u16 {
+            while unsafe { *cred.TargetName.0.offset(i) } != 0u16 {
                 i += 1;
             }
-            let target = unsafe { std::slice::from_raw_parts(cred.TargetName, i as usize) };
+            let target = unsafe { std::slice::from_raw_parts(cred.TargetName.0, i as usize) };
             let name = OsString::from_wide(target).into_string().unwrap();
             let mut value = BTreeMap::new();
             value.insert("targetname".to_string(), name);
 
             found_credentials.push(value);
         }
-        unsafe { CredFree(pcredentials as *mut c_void) };
+        unsafe { CredFree(Some(pcredentials as *const c_void)) };
         Ok(found_credentials)
     }
 }
@@ -253,19 +218,17 @@ unsafe fn get_credentials(id: &str, flags: u32) -> Result<Vec<(String, KeyRingSe
         Vec::new()
     };
     let filter = if flags > 0 {
-        std::ptr::null()
+        PCWSTR::null()
     } else {
-        id.as_ptr()
+        PCWSTR(id.as_ptr())
     };
-    let mut pcredentials: *mut PCREDENTIALW = std::ptr::null_mut();
+    let mut pcredentials: *mut *mut CREDENTIALW = std::ptr::null_mut();
     let mut count = 0;
-    let res = unsafe { CredEnumerateW(filter, flags, &mut count, &mut pcredentials) };
-    if res == 0 {
-        return WindowsOsKeyRing::handle_err::<Vec<(String, KeyRingSecret)>>();
-    }
+    unsafe { CredEnumerateW(filter, flags, &mut count, &mut pcredentials) }
+        .map_err(|e| KeyRingError::from(e.message().to_string_lossy()))?;
 
-    let credentials: &[PCREDENTIALW] =
-        unsafe { std::slice::from_raw_parts_mut(pcredentials, count as usize) };
+    let credentials: &[*mut CREDENTIALW] =
+        unsafe { std::slice::from_raw_parts(pcredentials, count as usize) };
 
     let mut found_credentials = Vec::new();
 
@@ -274,15 +237,17 @@ unsafe fn get_credentials(id: &str, flags: u32) -> Result<Vec<(String, KeyRingSe
         let blob: *const u8 = cred.CredentialBlob;
         let blob_len: usize = cred.CredentialBlobSize as usize;
         let mut i = 0isize;
-        while unsafe { *cred.TargetName.offset(i) } != 0u16 {
+        while unsafe { *cred.TargetName.0.offset(i) } != 0u16 {
             i += 1;
         }
-        let target = unsafe { std::slice::from_raw_parts(cred.TargetName, i as usize) };
+        let target = unsafe { std::slice::from_raw_parts(cred.TargetName.0, i as usize) };
         let name = OsString::from_wide(target).into_string().unwrap();
 
         let secret = unsafe { std::slice::from_raw_parts(blob, blob_len) };
-        let mut secret_u16 = vec![0; blob_len / 2];
-        LittleEndian::read_u16_into(secret, &mut secret_u16);
+        let mut secret_u16 = vec![0u16; blob_len / 2];
+        for (i, chunk) in secret.chunks_exact(2).enumerate() {
+            secret_u16[i] = u16::from_le_bytes([chunk[0], chunk[1]]);
+        }
         let t = match String::from_utf16(secret_u16.as_slice()).map(|pass| pass.to_string()) {
             Ok(s) => s,
             Err(_) => {
@@ -301,6 +266,6 @@ unsafe fn get_credentials(id: &str, flags: u32) -> Result<Vec<(String, KeyRingSe
         };
         found_credentials.push((name, KeyRingSecret(t.as_bytes().to_vec())));
     }
-    unsafe { CredFree(pcredentials as *mut c_void) };
+    unsafe { CredFree(Some(pcredentials as *const c_void)) };
     Ok(found_credentials)
 }
