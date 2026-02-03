@@ -125,15 +125,19 @@ fn get_keyring_file(in_path: Option<PathBuf>) -> PathBuf {
 
 #[cfg(target_os = "windows")]
 fn make_hidden(path: &Path) {
-    use ::windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_HIDDEN, SetFileAttributesW};
-    use ::windows::core::PCWSTR;
     use std::ffi::OsStr;
     use std::iter::once;
     use std::os::windows::ffi::OsStrExt;
 
+    const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+
+    unsafe extern "system" {
+        fn SetFileAttributesW(lpfilename: *const u16, dwfileattributes: u32) -> i32;
+    }
+
     let wide: Vec<u16> = OsStr::new(path).encode_wide().chain(once(0)).collect();
     unsafe {
-        let _ = SetFileAttributesW(PCWSTR(wide.as_ptr()), FILE_ATTRIBUTE_HIDDEN);
+        SetFileAttributesW(wide.as_ptr(), FILE_ATTRIBUTE_HIDDEN);
     }
 }
 

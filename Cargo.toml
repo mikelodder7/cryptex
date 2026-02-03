@@ -27,12 +27,14 @@ file = ["argon2", "chacha20poly1305", "dirs", "rusqlite"]
 linux-secret-service = ["secret-service", "uzers"]
 macos-keychain = ["security-framework", "security-framework-sys", "core-foundation", "core-foundation-sys", "uzers"]
 windows-credentials = ["windows"]
+serde = ["dep:serde", "postcard"]
 
 [dependencies]
 clap = "4"
 colored = "3.0"
 hex = "0.4"
 rpassword = "7"
+postcard = { version = "1", features = ["use-std"] , optional = true }
 serde = { version = "1", optional = true }
 subtle = "2"
 whoami = "2"
@@ -60,6 +62,5 @@ windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Security_Credentials",
     "Win32_Security_Cryptography",
-    "Win32_Storage_FileSystem",
 ], optional = true }
 

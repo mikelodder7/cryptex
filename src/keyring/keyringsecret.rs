@@ -13,7 +13,7 @@ use crate::error::KeyRingError;
 #[cfg(feature = "serde")]
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
-    de::{Error as DError, Visitor},
+    de::{DeserializeOwned, Error as DError, Visitor},
 };
 use zeroize::Zeroize;
 
@@ -64,6 +64,21 @@ impl KeyRingSecret {
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    #[cfg(feature = "serde")]
+    pub fn from_serde<S: Serialize>(input: S) -> Result<Self, KeyRingError> {
+        Ok(Self(
+            postcard::to_stdvec(&input).map_err(|e| KeyRingError::from(e.to_string().as_str()))?,
+        ))
+    }
+
+    #[cfg(feature = "serde")]
+    pub fn to_serde<D: DeserializeOwned>(&self) -> Result<D, KeyRingError> {
+        Ok(
+            postcard::from_bytes(&self.0)
+                .map_err(|e| KeyRingError::from(e.to_string().as_str()))?,
+        )
     }
 }
 
