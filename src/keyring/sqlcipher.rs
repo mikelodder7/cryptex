@@ -128,8 +128,8 @@ fn make_hidden(path: &Path) {
     use std::ffi::OsStr;
     use std::iter::once;
     use std::os::windows::ffi::OsStrExt;
-    use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_HIDDEN, SetFileAttributesW};
-    use windows::core::PCWSTR;
+    use ::windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_HIDDEN, SetFileAttributesW};
+    use ::windows::core::PCWSTR;
 
     let wide: Vec<u16> = OsStr::new(path).encode_wide().chain(once(0)).collect();
     unsafe {
