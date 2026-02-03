@@ -37,7 +37,7 @@ impl WindowsOsKeyRing {
     }
 
     fn handle_err<T>(err: ::windows::core::Error) -> Result<T> {
-        Err(KeyRingError::from(err.message().to_string()))
+        Err(KeyRingError::from(err.message().to_string().as_str()))
     }
 }
 
@@ -54,7 +54,9 @@ impl DynKeyRing for WindowsOsKeyRing {
                 &mut pcredential,
             )
         }
-        .map_err(|e: ::windows::core::Error| KeyRingError::from(e.message().to_string()))?;
+        .map_err(|e: ::windows::core::Error| {
+            KeyRingError::from(e.message().to_string().as_str())
+        })?;
 
         let credential: CREDENTIALW = unsafe { *pcredential };
 
@@ -145,8 +147,9 @@ impl DynKeyRing for WindowsOsKeyRing {
     fn delete_secret(&mut self, id: &str) -> Result<()> {
         let target_name = self.get_target_name(id);
 
-        unsafe { CredDeleteW(PCWSTR(target_name.as_ptr()), CRED_TYPE_GENERIC, Some(0)) }
-            .map_err(|e: ::windows::core::Error| KeyRingError::from(e.message().to_string()))?;
+        unsafe { CredDeleteW(PCWSTR(target_name.as_ptr()), CRED_TYPE_GENERIC, Some(0)) }.map_err(
+            |e: ::windows::core::Error| KeyRingError::from(e.message().to_string().as_str()),
+        )?;
         Ok(())
     }
 }
@@ -188,7 +191,9 @@ impl ListKeyRing for WindowsOsKeyRing {
                 &mut pcredentials,
             )
         }
-        .map_err(|e: ::windows::core::Error| KeyRingError::from(e.message().to_string()))?;
+        .map_err(|e: ::windows::core::Error| {
+            KeyRingError::from(e.message().to_string().as_str())
+        })?;
 
         let credentials: &[*mut CREDENTIALW] =
             unsafe { std::slice::from_raw_parts(pcredentials, count as usize) };
@@ -233,8 +238,9 @@ unsafe fn get_credentials(
     };
     let mut pcredentials: *mut *mut CREDENTIALW = std::ptr::null_mut();
     let mut count = 0u32;
-    unsafe { CredEnumerateW(filter, flags, &mut count, &mut pcredentials) }
-        .map_err(|e: ::windows::core::Error| KeyRingError::from(e.message().to_string()))?;
+    unsafe { CredEnumerateW(filter, flags, &mut count, &mut pcredentials) }.map_err(
+        |e: ::windows::core::Error| KeyRingError::from(e.message().to_string().as_str()),
+    )?;
 
     let credentials: &[*mut CREDENTIALW] =
         unsafe { std::slice::from_raw_parts(pcredentials, count as usize) };
