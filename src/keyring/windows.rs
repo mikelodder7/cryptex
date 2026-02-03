@@ -56,7 +56,7 @@ impl DynKeyRing for WindowsOsKeyRing {
 
         let credential: CREDENTIALW = unsafe { *pcredential };
 
-        let mut in_blob = CRYPT_INTEGER_BLOB {
+        let in_blob = CRYPT_INTEGER_BLOB {
             cbData: credential.CredentialBlobSize,
             pbData: credential.CredentialBlob,
         };
@@ -102,7 +102,7 @@ impl DynKeyRing for WindowsOsKeyRing {
 
         unsafe {
             CryptProtectData(
-                &mut in_blob,
+                &in_blob,
                 PCWSTR(target_name.as_ptr()),
                 None,
                 None,
@@ -115,7 +115,7 @@ impl DynKeyRing for WindowsOsKeyRing {
 
         secret_cp.zeroize();
 
-        let mut credential = CREDENTIALW {
+        let credential = CREDENTIALW {
             Flags: CRED_FLAGS(0),
             Type: CRED_TYPE_GENERIC,
             TargetName: PWSTR(target_name.as_mut_ptr()),
