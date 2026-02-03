@@ -26,9 +26,9 @@ jobs:
         with:
           toolchain: stable
           components: clippy
-      - run: cargo clippy --no-default-features --features linux-secret-service -- -D warnings
-      - run: cargo clippy --no-default-features --features serde -- -D warnings
-      - run: cargo clippy --no-default-features --features file -- -D warnings
+      - run: cargo clippy --no-default-features --features=linux-secret-service -- -D warnings
+      - run: cargo clippy --features=serde -- -D warnings
+      - run: cargo clippy --no-default-features --features=file -- -D warnings
       - run: cargo clippy --no-default-features --features "linux-secret-service,file" -- -D warnings
 
   clippy-macos:
