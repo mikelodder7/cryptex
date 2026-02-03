@@ -259,27 +259,28 @@ unsafe fn get_credentials(id: &str, flags: u32) -> Result<Vec<(String, KeyRingSe
     };
     let mut pcredentials: *mut PCREDENTIALW = std::ptr::null_mut();
     let mut count = 0;
-    let res = CredEnumerateW(filter, flags, &mut count, &mut pcredentials);
+    let res = unsafe { CredEnumerateW(filter, flags, &mut count, &mut pcredentials) };
     if res == 0 {
         return WindowsOsKeyRing::handle_err::<Vec<(String, KeyRingSecret)>>();
     }
 
-    let credentials: &[PCREDENTIALW] = std::slice::from_raw_parts_mut(pcredentials, count as usize);
+    let credentials: &[PCREDENTIALW] =
+        unsafe { std::slice::from_raw_parts_mut(pcredentials, count as usize) };
 
     let mut found_credentials = Vec::new();
 
     for c in credentials {
-        let cred: CREDENTIALW = **c;
+        let cred: CREDENTIALW = unsafe { **c };
         let blob: *const u8 = cred.CredentialBlob;
         let blob_len: usize = cred.CredentialBlobSize as usize;
         let mut i = 0isize;
-        while *cred.TargetName.offset(i) != 0u16 {
+        while unsafe { *cred.TargetName.offset(i) } != 0u16 {
             i += 1;
         }
-        let target = std::slice::from_raw_parts(cred.TargetName, i as usize);
+        let target = unsafe { std::slice::from_raw_parts(cred.TargetName, i as usize) };
         let name = OsString::from_wide(target).into_string().unwrap();
 
-        let secret = std::slice::from_raw_parts(blob, blob_len);
+        let secret = unsafe { std::slice::from_raw_parts(blob, blob_len) };
         let mut secret_u16 = vec![0; blob_len / 2];
         LittleEndian::read_u16_into(&secret, &mut secret_u16);
         let t = match String::from_utf16(secret_u16.as_slice()).map(|pass| pass.to_string()) {
@@ -300,6 +301,6 @@ unsafe fn get_credentials(id: &str, flags: u32) -> Result<Vec<(String, KeyRingSe
         };
         found_credentials.push((name, KeyRingSecret(t.as_bytes().to_vec())));
     }
-    CredFree(pcredentials as *mut c_void);
+    unsafe { CredFree(pcredentials as *mut c_void) };
     Ok(found_credentials)
 }
