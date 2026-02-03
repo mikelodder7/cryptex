@@ -64,7 +64,7 @@ impl MacOsKeyRing {
             &search_criteria["server"],
             security_domain,
             &search_criteria["account"],
-            &path,
+            path,
             port,
             protocol,
             authentication_type,

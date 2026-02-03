@@ -108,7 +108,7 @@ impl DynKeyRing for WindowsOsKeyRing {
         };
         unsafe { CredFree(pcredential as *mut c_void) };
         unsafe { LocalFree(out_blob.pbData as *mut c_void) };
-        res.map_err(|s| KeyRingError::from(s))
+        res
     }
 
     fn set_secret(&mut self, id: &str, secret: &[u8]) -> Result<()> {
@@ -282,7 +282,7 @@ unsafe fn get_credentials(id: &str, flags: u32) -> Result<Vec<(String, KeyRingSe
 
         let secret = unsafe { std::slice::from_raw_parts(blob, blob_len) };
         let mut secret_u16 = vec![0; blob_len / 2];
-        LittleEndian::read_u16_into(&secret, &mut secret_u16);
+        LittleEndian::read_u16_into(secret, &mut secret_u16);
         let t = match String::from_utf16(secret_u16.as_slice()).map(|pass| pass.to_string()) {
             Ok(s) => s,
             Err(_) => {
