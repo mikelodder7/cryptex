@@ -19,11 +19,17 @@ pub mod windows;
 pub use self::macos::MacOsKeyRing as OsKeyRing;
 
 #[cfg(all(target_os = "linux", feature = "linux-secret-service"))]
-#[cfg_attr(docsrs, doc(cfg(all(target_os = "linux", feature = "linux-secret-service"))))]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(all(target_os = "linux", feature = "linux-secret-service")))
+)]
 pub use self::linux::LinuxOsKeyRing as OsKeyRing;
 
 #[cfg(all(target_os = "windows", feature = "windows-credentials"))]
-#[cfg_attr(docsrs, doc(cfg(all(target_os = "windows", feature = "windows-credentials"))))]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(all(target_os = "windows", feature = "windows-credentials")))
+)]
 pub use self::windows::WindowsOsKeyRing as OsKeyRing;
 
 use std::collections::BTreeMap;
@@ -43,17 +49,23 @@ use users::{get_current_username, get_effective_username};
     all(target_os = "macos", feature = "macos-keychain"),
     all(target_os = "windows", feature = "windows-credentials"),
 ))]
-#[cfg_attr(docsrs, doc(cfg(any(
-    all(target_os = "macos", feature = "macos-keychain"),
-    all(target_os = "windows", feature = "windows-credentials"),
-))))]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(any(
+        all(target_os = "macos", feature = "macos-keychain"),
+        all(target_os = "windows", feature = "windows-credentials"),
+    )))
+)]
 pub fn get_os_keyring(service: &str) -> Result<OsKeyRing> {
     OsKeyRing::new(service)
 }
 
 /// Return the OS keyring if available
 #[cfg(all(target_os = "linux", feature = "linux-secret-service"))]
-#[cfg_attr(docsrs, doc(cfg(all(target_os = "linux", feature = "linux-secret-service"))))]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(all(target_os = "linux", feature = "linux-secret-service")))
+)]
 pub fn get_os_keyring(service: &str) -> Result<OsKeyRing<'_>> {
     OsKeyRing::new(service)
 }

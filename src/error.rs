@@ -69,7 +69,10 @@ impl From<MacOsError> for KeyRingError {
 }
 
 #[cfg(all(target_os = "linux", feature = "linux-secret-service"))]
-#[cfg_attr(docsrs, doc(cfg(all(target_os = "linux", feature = "linux-secret-service"))))]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(all(target_os = "linux", feature = "linux-secret-service")))
+)]
 impl From<LinuxOsError> for KeyRingError {
     fn from(e: LinuxOsError) -> Self {
         match e {

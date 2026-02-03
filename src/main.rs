@@ -145,7 +145,9 @@ fn dispatch(matches: &ArgMatches) {
     all(target_os = "linux", feature = "linux-secret-service"),
 )))]
 fn dispatch(_matches: &ArgMatches) {
-    die::<()>("No OS keyring available. Enable a platform keyring feature ('linux-secret-service', 'macos-keychain', or 'windows-credentials'), or use the library API with the 'file' feature for SQLCipher.");
+    die::<()>(
+        "No OS keyring available. Enable a platform keyring feature ('linux-secret-service', 'macos-keychain', or 'windows-credentials'), or use the library API with the 'file' feature for SQLCipher.",
+    );
 }
 
 #[cfg(any(

@@ -24,7 +24,7 @@ name = "cryptex"
 [features]
 default = ["linux-secret-service", "macos-keychain", "windows-credentials"]
 file = ["argon2", "chacha20poly1305", "dirs", "rusqlite"]
-linux-secret-service = ["secret-service", "maplit", "users"]
+linux-secret-service = ["secret-service", "users"]
 macos-keychain = ["security-framework", "security-framework-sys", "core-foundation", "core-foundation-sys", "users"]
 windows-credentials = ["winapi", "byteorder"]
 
@@ -44,8 +44,7 @@ chacha20poly1305 = { version = "0.10", optional = true }
 dirs = { version = "6.0", optional = true }
 rusqlite = { version = "0.37", features = ["bundled-sqlcipher-vendored-openssl"], optional = true }
 
-[dev-dependencies]
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
+
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 users = { version = "0.11", optional = true }
@@ -57,8 +56,7 @@ core-foundation = { version = "0.9", optional = true }
 core-foundation-sys = { version = "0.8", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-maplit = { version = "1", optional = true }
-secret-service = { version = "2", optional = true }
+secret-service = { version = "5", features = ["rt-tokio-crypto-rust"], optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "0.3", features = ["dpapi", "errhandlingapi", "wincred", "winerror"], optional = true }

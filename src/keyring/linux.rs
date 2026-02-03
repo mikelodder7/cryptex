@@ -2,12 +2,13 @@
     Copyright Michael Lodder. All Rights Reserved.
     SPDX-License-Identifier: Apache-2.0
 */
-use secret_service::{EncryptionType, SecretService};
+use secret_service::EncryptionType;
+use secret_service::blocking::SecretService;
 
 use super::*;
 use crate::error::KeyRingError;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 pub struct LinuxOsKeyRing<'a> {
     keychain: SecretService<'a>,
@@ -28,12 +29,12 @@ impl<'a> DynKeyRing for LinuxOsKeyRing<'a> {
         if collection.is_locked().map_err(KeyRingError::from)? {
             collection.unlock().map_err(KeyRingError::from)?
         }
-        let attributes = maplit::hashmap![
-            "application" => "lox",
-            "service" => &self.service,
-            "username" => &self.username,
-            "id" => id,
-        ];
+        let attributes = HashMap::from([
+            ("application", "lox"),
+            ("service", self.service.as_str()),
+            ("username", self.username.as_str()),
+            ("id", id),
+        ]);
         let search = collection
             .search_items(attributes)
             .map_err(KeyRingError::from)?;
@@ -50,12 +51,12 @@ impl<'a> DynKeyRing for LinuxOsKeyRing<'a> {
         if collection.is_locked().map_err(KeyRingError::from)? {
             collection.unlock().map_err(KeyRingError::from)?
         }
-        let attributes = maplit::hashmap![
-            "application" => "lox",
-            "service" => &self.service,
-            "username" => &self.username,
-            "id" => id,
-        ];
+        let attributes = HashMap::from([
+            ("application", "lox"),
+            ("service", self.service.as_str()),
+            ("username", self.username.as_str()),
+            ("id", id),
+        ]);
         collection
             .create_item(
                 &format!("Secret for {}", id),
@@ -76,12 +77,12 @@ impl<'a> DynKeyRing for LinuxOsKeyRing<'a> {
         if collection.is_locked().map_err(KeyRingError::from)? {
             collection.unlock().map_err(KeyRingError::from)?
         }
-        let attributes = maplit::hashmap![
-            "application" => "lox",
-            "service" => &self.service,
-            "username" => &self.username,
-            "id" => id,
-        ];
+        let attributes = HashMap::from([
+            ("application", "lox"),
+            ("service", self.service.as_str()),
+            ("username", self.username.as_str()),
+            ("id", id),
+        ]);
         let search = collection
             .search_items(attributes)
             .map_err(KeyRingError::from)?;
@@ -95,7 +96,7 @@ impl<'a> DynKeyRing for LinuxOsKeyRing<'a> {
 impl<'a> NewKeyRing for LinuxOsKeyRing<'a> {
     fn new<S: AsRef<str>>(service: S) -> Result<Self> {
         Ok(LinuxOsKeyRing {
-            keychain: SecretService::new(EncryptionType::Dh)?,
+            keychain: SecretService::connect(EncryptionType::Dh)?,
             service: service.as_ref().to_string(),
             username: get_username(),
         })
@@ -105,7 +106,7 @@ impl<'a> NewKeyRing for LinuxOsKeyRing<'a> {
 impl<'a> PeekableKeyRing for LinuxOsKeyRing<'a> {
     fn peek_secret<S: AsRef<str>>(id: S) -> Result<Vec<(String, KeyRingSecret)>> {
         let id = id.as_ref();
-        let key_chain = SecretService::new(EncryptionType::Dh).map_err(KeyRingError::from)?;
+        let key_chain = SecretService::connect(EncryptionType::Dh).map_err(KeyRingError::from)?;
         let collection = key_chain
             .get_default_collection()
             .map_err(KeyRingError::from)?;
@@ -152,7 +153,7 @@ impl<'a> PeekableKeyRing for LinuxOsKeyRing<'a> {
 
 impl<'a> ListKeyRing for LinuxOsKeyRing<'a> {
     fn list_secrets() -> Result<Vec<BTreeMap<String, String>>> {
-        let key_chain = SecretService::new(EncryptionType::Dh).map_err(KeyRingError::from)?;
+        let key_chain = SecretService::connect(EncryptionType::Dh).map_err(KeyRingError::from)?;
         let collection = key_chain
             .get_default_collection()
             .map_err(KeyRingError::from)?;
