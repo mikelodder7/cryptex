@@ -13,21 +13,52 @@
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 use colored::Colorize;
-use cryptex::{KeyRing, KeyRingSecret, ListKeyRing, PeekableKeyRing, allows_file, get_os_keyring};
+use cryptex::allows_file;
+
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+))]
+use cryptex::{KeyRing, KeyRingSecret, ListKeyRing, PeekableKeyRing, get_os_keyring};
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+))]
+use std::collections::BTreeMap;
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+))]
 use std::fs::File;
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+))]
 use std::io::{self, Read, Write};
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+))]
 use std::path::PathBuf;
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+))]
 use zeroize::Zeroize;
 
-use std::collections::BTreeMap;
-
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "macos-keychain"))]
 use cryptex::macos::MacOsKeyRing as OsKeyRing;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "linux-secret-service"))]
 use cryptex::linux::LinuxOsKeyRing as OsKeyRing;
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "windows-credentials"))]
 use cryptex::windows::WindowsOsKeyRing as OsKeyRing;
 
 fn main() {
@@ -84,6 +115,15 @@ fn main() {
             .about("List all the secret names in the keychain.")
         ).get_matches();
 
+    dispatch(&matches);
+}
+
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+))]
+fn dispatch(matches: &ArgMatches) {
     if let Some(matches) = matches.subcommand_matches("get") {
         get(matches);
     } else if let Some(matches) = matches.subcommand_matches("set") {
@@ -99,6 +139,20 @@ fn main() {
     }
 }
 
+#[cfg(not(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+)))]
+fn dispatch(_matches: &ArgMatches) {
+    die::<()>("No OS keyring available. Enable a platform keyring feature ('linux-secret-service', 'macos-keychain', or 'windows-credentials'), or use the library API with the 'file' feature for SQLCipher.");
+}
+
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+))]
 fn get(matches: &ArgMatches) {
     let mut keyring = get_keyring(matches);
     let id = get_id(matches, true);
@@ -110,6 +164,11 @@ fn get(matches: &ArgMatches) {
     io::stdout().flush().unwrap();
 }
 
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+))]
 fn peek(matches: &ArgMatches) {
     let id = get_id(matches, false);
 
@@ -130,6 +189,11 @@ fn peek(matches: &ArgMatches) {
     }
 }
 
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+))]
 fn list() {
     let secret_names = OsKeyRing::list_secrets()
         .unwrap_or_else(|e| die::<Vec<BTreeMap<String, String>>>(&e.to_string()));
@@ -138,6 +202,11 @@ fn list() {
     }
 }
 
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+))]
 fn delete(matches: &ArgMatches) {
     let mut keyring = get_keyring(matches);
     let id = get_id(matches, true);
@@ -148,6 +217,11 @@ fn delete(matches: &ArgMatches) {
     println!("{}", "Success".green());
 }
 
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+))]
 fn set(matches: &ArgMatches) {
     let mut keyring = get_keyring(matches);
     let id = matches.value_of("ID").unwrap();
@@ -160,6 +234,11 @@ fn set(matches: &ArgMatches) {
     println!("{}", "Success".green());
 }
 
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+))]
 fn get_id(matches: &ArgMatches, read_stdin: bool) -> String {
     let id = read_input(matches, "ID", read_stdin);
     let mut id_str = String::new();
@@ -171,7 +250,7 @@ fn get_id(matches: &ArgMatches, read_stdin: bool) -> String {
     id_str
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "linux-secret-service"))]
 fn get_keyring<'a>(matches: &'a ArgMatches) -> OsKeyRing<'a> {
     let service = matches.value_of("SERVICE").unwrap();
     match get_os_keyring(service) {
@@ -180,7 +259,10 @@ fn get_keyring<'a>(matches: &'a ArgMatches) -> OsKeyRing<'a> {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+))]
 fn get_keyring(matches: &ArgMatches) -> OsKeyRing {
     let service = matches.value_of("SERVICE").unwrap();
     match get_os_keyring(service) {
@@ -189,6 +271,11 @@ fn get_keyring(matches: &ArgMatches) -> OsKeyRing {
     }
 }
 
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+))]
 fn read_input(matches: &ArgMatches, name: &str, read_stdin: bool) -> Vec<u8> {
     match matches.value_of(name) {
         Some(text) => match get_file(text) {
@@ -218,6 +305,11 @@ fn read_input(matches: &ArgMatches, name: &str, read_stdin: bool) -> Vec<u8> {
     }
 }
 
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+))]
 fn read_stream<R: Read>(f: &mut R) -> Vec<u8> {
     let mut bytes = Vec::new();
     let mut buffer = [0u8; 4096];
@@ -238,6 +330,11 @@ fn read_stream<R: Read>(f: &mut R) -> Vec<u8> {
     bytes
 }
 
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+))]
 fn get_file(name: &str) -> Option<PathBuf> {
     let mut file = PathBuf::new();
     file.push(name);

@@ -8,9 +8,9 @@ use std::{
     fmt::{self, Debug, Display, Formatter},
 };
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "linux-secret-service"))]
 use secret_service::Error as LinuxOsError;
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "macos-keychain"))]
 use security_framework::base::Error as MacOsError;
 
 #[derive(Clone, Eq, PartialEq)]
@@ -52,8 +52,8 @@ impl From<&str> for KeyRingError {
 
 impl Error for KeyRingError {}
 
-#[cfg(target_os = "macos")]
-#[cfg_attr(docsrs, doc(cfg(target_os = "macos")))]
+#[cfg(all(target_os = "macos", feature = "macos-keychain"))]
+#[cfg_attr(docsrs, doc(cfg(all(target_os = "macos", feature = "macos-keychain"))))]
 impl From<MacOsError> for KeyRingError {
     fn from(e: MacOsError) -> Self {
         match e.code() {
@@ -68,8 +68,8 @@ impl From<MacOsError> for KeyRingError {
     }
 }
 
-#[cfg(target_os = "linux")]
-#[cfg_attr(docsrs, doc(cfg(target_os = "linux")))]
+#[cfg(all(target_os = "linux", feature = "linux-secret-service"))]
+#[cfg_attr(docsrs, doc(cfg(all(target_os = "linux", feature = "linux-secret-service"))))]
 impl From<LinuxOsError> for KeyRingError {
     fn from(e: LinuxOsError) -> Self {
         match e {

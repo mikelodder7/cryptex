@@ -5,25 +5,25 @@
 
 mod keyringsecret;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "linux-secret-service"))]
 pub mod linux;
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "macos-keychain"))]
 pub mod macos;
 #[cfg(feature = "file")]
 pub mod sqlcipher;
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "windows-credentials"))]
 pub mod windows;
 
-#[cfg(target_os = "macos")]
-#[cfg_attr(docsrs, doc(cfg(target_os = "macos")))]
+#[cfg(all(target_os = "macos", feature = "macos-keychain"))]
+#[cfg_attr(docsrs, doc(cfg(all(target_os = "macos", feature = "macos-keychain"))))]
 pub use self::macos::MacOsKeyRing as OsKeyRing;
 
-#[cfg(target_os = "linux")]
-#[cfg_attr(docsrs, doc(cfg(target_os = "linux")))]
+#[cfg(all(target_os = "linux", feature = "linux-secret-service"))]
+#[cfg_attr(docsrs, doc(cfg(all(target_os = "linux", feature = "linux-secret-service"))))]
 pub use self::linux::LinuxOsKeyRing as OsKeyRing;
 
-#[cfg(target_os = "windows")]
-#[cfg_attr(docsrs, doc(cfg(target_os = "windows")))]
+#[cfg(all(target_os = "windows", feature = "windows-credentials"))]
+#[cfg_attr(docsrs, doc(cfg(all(target_os = "windows", feature = "windows-credentials"))))]
 pub use self::windows::WindowsOsKeyRing as OsKeyRing;
 
 use std::collections::BTreeMap;
@@ -32,27 +32,44 @@ pub type Result<T> = std::result::Result<T, crate::error::KeyRingError>;
 
 pub use keyringsecret::*;
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(
+    all(target_os = "linux", feature = "linux-secret-service"),
+    all(target_os = "macos", feature = "macos-keychain"),
+))]
 use users::{get_current_username, get_effective_username};
 
 /// Return the OS keyring if available
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-#[cfg_attr(docsrs, doc(cfg(any(target_os = "macos", target_os = "windows"))))]
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+))]
+#[cfg_attr(docsrs, doc(cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+))))]
 pub fn get_os_keyring(service: &str) -> Result<OsKeyRing> {
     OsKeyRing::new(service)
 }
 
 /// Return the OS keyring if available
-#[cfg(target_os = "linux")]
-#[cfg_attr(docsrs, doc(cfg(target_os = "linux")))]
+#[cfg(all(target_os = "linux", feature = "linux-secret-service"))]
+#[cfg_attr(docsrs, doc(cfg(all(target_os = "linux", feature = "linux-secret-service"))))]
 pub fn get_os_keyring(service: &str) -> Result<OsKeyRing<'_>> {
     OsKeyRing::new(service)
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-compile_error!("no keyring implementation is available for this platform");
+#[cfg(not(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+    feature = "file",
+)))]
+compile_error!("no keyring implementation is selected or available for this platform");
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(
+    all(target_os = "linux", feature = "linux-secret-service"),
+    all(target_os = "macos", feature = "macos-keychain"),
+))]
 fn get_username() -> String {
     fn get_current_user() -> String {
         match get_current_username() {
@@ -125,7 +142,10 @@ pub trait ListKeyRing {
     fn list_secrets() -> Result<Vec<BTreeMap<String, String>>>;
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+))]
 pub(crate) fn parse_peek_criteria(id: &str) -> BTreeMap<String, String> {
     let mut result = BTreeMap::new();
     if !id.is_empty() {

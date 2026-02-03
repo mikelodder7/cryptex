@@ -13,7 +13,7 @@ keywords = ["secrets", "vault", "keyring"]
 license = "MIT/Apache-2.0"
 repository = "https://github.com/mikelodder7/cryptex"
 readme = "README.md"
-version = "1.10.0"
+version = "1.11.0"
 
 [lib]
 crate-type = ["staticlib", "rlib", "cdylib"]
@@ -22,8 +22,11 @@ crate-type = ["staticlib", "rlib", "cdylib"]
 name = "cryptex"
 
 [features]
-default = []
+default = ["linux-secret-service", "macos-keychain", "windows-credentials"]
 file = ["argon2", "chacha20poly1305", "dirs", "rusqlite"]
+linux-secret-service = ["secret-service", "maplit", "users"]
+macos-keychain = ["security-framework", "security-framework-sys", "core-foundation", "core-foundation-sys", "users"]
+windows-credentials = ["winapi", "byteorder"]
 
 [dependencies]
 atty = "0.2"
@@ -45,18 +48,18 @@ rusqlite = { version = "0.37", features = ["bundled-sqlcipher-vendored-openssl"]
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
-users = "0.11"
+users = { version = "0.11", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-security-framework = "2.9"
-security-framework-sys = "2.9"
-core-foundation = "0.9"
-core-foundation-sys = "0.8"
+security-framework = { version = "2.9", optional = true }
+security-framework-sys = { version = "2.9", optional = true }
+core-foundation = { version = "0.9", optional = true }
+core-foundation-sys = { version = "0.8", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-maplit = "1"
-secret-service = "2"
+maplit = { version = "1", optional = true }
+secret-service = { version = "2", optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-winapi = { version = "0.3", features = ["dpapi", "errhandlingapi", "wincred", "winerror"] }
-byteorder = "1.5"
+winapi = { version = "0.3", features = ["dpapi", "errhandlingapi", "wincred", "winerror"], optional = true }
+byteorder = { version = "1.5", optional = true }

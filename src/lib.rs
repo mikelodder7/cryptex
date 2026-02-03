@@ -15,7 +15,10 @@ mod keyring;
 
 pub use keyring::*;
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+))]
 #[cfg(test)]
 mod test {
     use super::*;

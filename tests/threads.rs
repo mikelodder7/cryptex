@@ -1,3 +1,9 @@
+#![cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+))]
+
 use cryptex::{KeyRing, get_os_keyring};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
