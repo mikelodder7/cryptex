@@ -18,7 +18,7 @@ defaults:
     shell: bash
 
 jobs:
-  clippy:
+  clippy-linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,6 +28,35 @@ jobs:
           components: clippy
       - run: cargo clippy --no-default-features --features linux-secret-service -- -D warnings
       - run: cargo clippy --no-default-features --features file -- -D warnings
+      - run: cargo clippy --no-default-features --features "linux-secret-service,file" -- -D warnings
+
+  clippy-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          components: clippy
+      - run: cargo clippy --no-default-features --features macos-keychain -- -D warnings
+      - run: cargo clippy --no-default-features --features file -- -D warnings
+      - run: cargo clippy --no-default-features --features "macos-keychain,file" -- -D warnings
+
+  clippy-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          components: clippy
+      - name: Use Strawberry Perl for OpenSSL build
+        run: |
+          echo "C:\Strawberry\perl\bin" >> $GITHUB_PATH
+          rm -f /usr/bin/perl
+      - run: cargo clippy --no-default-features --features windows-credentials -- -D warnings
+      - run: cargo clippy --no-default-features --features file -- -D warnings
+      - run: cargo clippy --no-default-features --features "windows-credentials,file" -- -D warnings
 
   rustfmt:
     runs-on: ubuntu-latest
@@ -39,7 +68,7 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all -- --check
 
-  doc:
+  doc-linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,6 +76,28 @@ jobs:
         with:
           toolchain: stable
       - run: cargo doc --no-default-features --features "linux-secret-service,file"
+
+  doc-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - run: cargo doc --no-default-features --features "macos-keychain,file"
+
+  doc-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - name: Use Strawberry Perl for OpenSSL build
+        run: |
+          echo "C:\Strawberry\perl\bin" >> $GITHUB_PATH
+          rm -f /usr/bin/perl
+      - run: cargo doc --no-default-features --features "windows-credentials,file"
 
   linux:
     runs-on: ubuntu-latest
@@ -123,7 +174,9 @@ jobs:
         with:
           toolchain: stable
       - name: Use Strawberry Perl for OpenSSL build
-        run: echo "C:\Strawberry\perl\bin" >> $GITHUB_PATH
+        run: |
+          echo "C:\Strawberry\perl\bin" >> $GITHUB_PATH
+          rm -f /usr/bin/perl
       - uses: actions/cache@v4
         with:
           path: |
