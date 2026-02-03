@@ -8,17 +8,17 @@ use std::iter::once;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 
 use crate::error::KeyRingError;
-use std::collections::BTreeMap;
 use ::windows::Win32::Foundation::{FILETIME, HLOCAL, LocalFree};
 use ::windows::Win32::Security::Credentials::{
-    CRED_ENUMERATE_ALL_CREDENTIALS, CRED_FLAGS, CRED_PERSIST_ENTERPRISE, CRED_TYPE_GENERIC,
-    CREDENTIAL_ATTRIBUTEW, CREDENTIALW, CredDeleteW, CredEnumerateW, CredFree, CredReadW,
-    CredWriteW,
+    CRED_ENUMERATE_ALL_CREDENTIALS, CRED_ENUMERATE_FLAGS, CRED_FLAGS, CRED_PERSIST_ENTERPRISE,
+    CRED_TYPE_GENERIC, CREDENTIAL_ATTRIBUTEW, CREDENTIALW, CredDeleteW, CredEnumerateW, CredFree,
+    CredReadW, CredWriteW,
 };
 use ::windows::Win32::Security::Cryptography::{
     CRYPT_INTEGER_BLOB, CryptProtectData, CryptUnprotectData,
 };
 use ::windows::core::{PCWSTR, PWSTR};
+use std::collections::BTreeMap;
 use zeroize::Zeroize;
 
 pub struct WindowsOsKeyRing {
@@ -37,7 +37,7 @@ impl WindowsOsKeyRing {
     }
 
     fn handle_err<T>(err: ::windows::core::Error) -> Result<T> {
-        Err(KeyRingError::from(err.message().to_string_lossy()))
+        Err(KeyRingError::from(err.message().to_string()))
     }
 }
 
@@ -49,12 +49,12 @@ impl DynKeyRing for WindowsOsKeyRing {
         unsafe {
             CredReadW(
                 PCWSTR(target_name.as_ptr()),
-                CRED_TYPE_GENERIC.0,
-                0,
+                CRED_TYPE_GENERIC,
+                Some(0),
                 &mut pcredential,
             )
         }
-        .map_err(|e: ::windows::core::Error| KeyRingError::from(e.message().to_string_lossy()))?;
+        .map_err(|e: ::windows::core::Error| KeyRingError::from(e.message().to_string()))?;
 
         let credential: CREDENTIALW = unsafe { *pcredential };
 
@@ -81,7 +81,7 @@ impl DynKeyRing for WindowsOsKeyRing {
                 r
             }
         };
-        unsafe { CredFree(Some(pcredential as *const c_void)) };
+        unsafe { CredFree(pcredential as *const c_void) };
         unsafe { LocalFree(Some(HLOCAL(out_blob.pbData as _))) };
         res
     }
@@ -119,7 +119,7 @@ impl DynKeyRing for WindowsOsKeyRing {
 
         let mut credential = CREDENTIALW {
             Flags: CRED_FLAGS(0),
-            Type: CRED_TYPE_GENERIC.0,
+            Type: CRED_TYPE_GENERIC,
             TargetName: PWSTR(target_name.as_mut_ptr()),
             Comment: PWSTR(empty.as_mut_ptr()),
             LastWritten: FILETIME {
@@ -128,7 +128,7 @@ impl DynKeyRing for WindowsOsKeyRing {
             },
             CredentialBlobSize: out_blob.cbData,
             CredentialBlob: out_blob.pbData,
-            Persist: CRED_PERSIST_ENTERPRISE.0,
+            Persist: CRED_PERSIST_ENTERPRISE,
             Attributes: attributes,
             AttributeCount: 0,
             TargetAlias: PWSTR(empty.as_mut_ptr()),
@@ -145,10 +145,8 @@ impl DynKeyRing for WindowsOsKeyRing {
     fn delete_secret(&mut self, id: &str) -> Result<()> {
         let target_name = self.get_target_name(id);
 
-        unsafe { CredDeleteW(PCWSTR(target_name.as_ptr()), CRED_TYPE_GENERIC.0, 0) }
-            .map_err(|e: ::windows::core::Error| {
-                KeyRingError::from(e.message().to_string_lossy())
-            })?;
+        unsafe { CredDeleteW(PCWSTR(target_name.as_ptr()), CRED_TYPE_GENERIC, Some(0)) }
+            .map_err(|e: ::windows::core::Error| KeyRingError::from(e.message().to_string()))?;
         Ok(())
     }
 }
@@ -166,9 +164,9 @@ impl PeekableKeyRing for WindowsOsKeyRing {
     fn peek_secret<S: AsRef<str>>(id: S) -> Result<Vec<(String, KeyRingSecret)>> {
         let id = id.as_ref();
         let flags = if id.is_empty() {
-            CRED_ENUMERATE_ALL_CREDENTIALS
+            Some(CRED_ENUMERATE_ALL_CREDENTIALS)
         } else {
-            0
+            None
         };
 
         let found_credentials = unsafe { get_credentials(id, flags)? };
@@ -179,17 +177,21 @@ impl PeekableKeyRing for WindowsOsKeyRing {
 
 impl ListKeyRing for WindowsOsKeyRing {
     fn list_secrets() -> Result<Vec<BTreeMap<String, String>>> {
-        let flags = CRED_ENUMERATE_ALL_CREDENTIALS;
         let mut pcredentials: *mut *mut CREDENTIALW = std::ptr::null_mut();
-        let mut count = 0;
+        let mut count = 0u32;
 
-        unsafe { CredEnumerateW(PCWSTR::null(), flags, &mut count, &mut pcredentials) }
-            .map_err(|e: ::windows::core::Error| {
-                KeyRingError::from(e.message().to_string_lossy())
-            })?;
+        unsafe {
+            CredEnumerateW(
+                PCWSTR::null(),
+                Some(CRED_ENUMERATE_ALL_CREDENTIALS),
+                &mut count,
+                &mut pcredentials,
+            )
+        }
+        .map_err(|e: ::windows::core::Error| KeyRingError::from(e.message().to_string()))?;
 
         let credentials: &[*mut CREDENTIALW] =
-            unsafe { std::slice::from_raw_parts(pcredentials, count) };
+            unsafe { std::slice::from_raw_parts(pcredentials, count as usize) };
 
         let mut found_credentials = Vec::new();
 
@@ -206,7 +208,7 @@ impl ListKeyRing for WindowsOsKeyRing {
 
             found_credentials.push(value);
         }
-        unsafe { CredFree(Some(pcredentials as *const c_void)) };
+        unsafe { CredFree(pcredentials as *const c_void) };
         Ok(found_credentials)
     }
 }
@@ -215,24 +217,27 @@ fn to_utf16_bytes(s: &str) -> Vec<u16> {
     OsStr::new(s).encode_wide().chain(once(0)).collect()
 }
 
-unsafe fn get_credentials(id: &str, flags: u32) -> Result<Vec<(String, KeyRingSecret)>> {
+unsafe fn get_credentials(
+    id: &str,
+    flags: Option<CRED_ENUMERATE_FLAGS>,
+) -> Result<Vec<(String, KeyRingSecret)>> {
     let id = if !id.is_empty() {
         to_utf16_bytes(id)
     } else {
         Vec::new()
     };
-    let filter = if flags > 0 {
+    let filter = if flags.is_some() {
         PCWSTR::null()
     } else {
         PCWSTR(id.as_ptr())
     };
     let mut pcredentials: *mut *mut CREDENTIALW = std::ptr::null_mut();
-    let mut count = 0;
+    let mut count = 0u32;
     unsafe { CredEnumerateW(filter, flags, &mut count, &mut pcredentials) }
-        .map_err(|e: ::windows::core::Error| KeyRingError::from(e.message().to_string_lossy()))?;
+        .map_err(|e: ::windows::core::Error| KeyRingError::from(e.message().to_string()))?;
 
     let credentials: &[*mut CREDENTIALW] =
-        unsafe { std::slice::from_raw_parts(pcredentials, count) };
+        unsafe { std::slice::from_raw_parts(pcredentials, count as usize) };
 
     let mut found_credentials = Vec::new();
 
@@ -270,6 +275,6 @@ unsafe fn get_credentials(id: &str, flags: u32) -> Result<Vec<(String, KeyRingSe
         };
         found_credentials.push((name, KeyRingSecret(t.as_bytes().to_vec())));
     }
-    unsafe { CredFree(Some(pcredentials as *const c_void)) };
+    unsafe { CredFree(pcredentials as *const c_void) };
     Ok(found_credentials)
 }
