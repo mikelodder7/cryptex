@@ -75,8 +75,7 @@ impl KeyRingSecret {
 
     #[cfg(feature = "serde")]
     pub fn to_serde<D: DeserializeOwned>(&self) -> Result<D, KeyRingError> {
-        postcard::from_bytes(&self.0)
-            .map_err(|e| KeyRingError::from(e.to_string().as_str()))
+        postcard::from_bytes(&self.0).map_err(|e| KeyRingError::from(e.to_string().as_str()))
     }
 }
 
