@@ -52,10 +52,13 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        features:
-          - linux-secret-service
-          - file
-          - linux-secret-service,file
+        include:
+          - features: linux-secret-service
+            cache-key: linux-secret-service
+          - features: file
+            cache-key: file
+          - features: "linux-secret-service,file"
+            cache-key: linux-secret-service-file
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -66,9 +69,9 @@ jobs:
           path: |
             ~/.cargo/registry
             target
-          key: ${{ runner.os }}-cargo-${{ matrix.features }}-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ matrix.cache-key }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-${{ matrix.features }}-
+            ${{ runner.os }}-cargo-${{ matrix.cache-key }}-
       - name: Build
         run: cargo build --no-default-features --features "${{ matrix.features }}"
       - name: Test
@@ -78,10 +81,13 @@ jobs:
     runs-on: macos-latest
     strategy:
       matrix:
-        features:
-          - macos-keychain
-          - file
-          - macos-keychain,file
+        include:
+          - features: macos-keychain
+            cache-key: macos-keychain
+          - features: file
+            cache-key: file
+          - features: "macos-keychain,file"
+            cache-key: macos-keychain-file
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -92,9 +98,9 @@ jobs:
           path: |
             ~/.cargo/registry
             target
-          key: ${{ runner.os }}-cargo-${{ matrix.features }}-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ matrix.cache-key }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-${{ matrix.features }}-
+            ${{ runner.os }}-cargo-${{ matrix.cache-key }}-
       - name: Build
         run: cargo build --no-default-features --features "${{ matrix.features }}"
       - name: Test
@@ -104,10 +110,13 @@ jobs:
     runs-on: windows-latest
     strategy:
       matrix:
-        features:
-          - windows-credentials
-          - file
-          - windows-credentials,file
+        include:
+          - features: windows-credentials
+            cache-key: windows-credentials
+          - features: file
+            cache-key: file
+          - features: "windows-credentials,file"
+            cache-key: windows-credentials-file
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -118,9 +127,9 @@ jobs:
           path: |
             ~/.cargo/registry
             target
-          key: ${{ runner.os }}-cargo-${{ matrix.features }}-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ matrix.cache-key }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-${{ matrix.features }}-
+            ${{ runner.os }}-cargo-${{ matrix.cache-key }}-
       - name: Build
         run: cargo build --no-default-features --features "${{ matrix.features }}"
       - name: Test

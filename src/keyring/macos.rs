@@ -7,12 +7,8 @@ use security_framework::os::macos::passwords::{
     SecAuthenticationType, SecProtocolType, find_generic_password, find_internet_password,
 };
 use security_framework_sys::item::{
-    kSecClass,
-    kSecClassGenericPassword,
-    kSecClassInternetPassword,
-    kSecMatchLimit,
-    kSecMatchLimitAll,
-    kSecReturnAttributes,
+    kSecClass, kSecClassGenericPassword, kSecClassInternetPassword, kSecMatchLimit,
+    kSecMatchLimitAll, kSecReturnAttributes,
 };
 use security_framework_sys::keychain_item::SecItemCopyMatching;
 
