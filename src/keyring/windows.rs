@@ -66,19 +66,19 @@ impl DynKeyRing for WindowsOsKeyRing {
             pbData: std::ptr::null_mut(),
         };
 
-        let res = match unsafe {
-            CryptUnprotectData(&in_blob, None, None, None, None, 0, &mut out_blob)
-        } {
-            Err(_) => Err(KeyRingError::from("Windows Crypt Unprotect Data Error")),
-            Ok(()) => {
-                let secret = unsafe {
-                    std::slice::from_raw_parts_mut(out_blob.pbData, out_blob.cbData as usize)
-                };
-                let r = Ok(KeyRingSecret(secret.to_vec()));
-                secret.zeroize();
-                r
-            }
-        };
+        let res =
+            match unsafe { CryptUnprotectData(&in_blob, None, None, None, None, 0, &mut out_blob) }
+            {
+                Err(_) => Err(KeyRingError::from("Windows Crypt Unprotect Data Error")),
+                Ok(()) => {
+                    let secret = unsafe {
+                        std::slice::from_raw_parts_mut(out_blob.pbData, out_blob.cbData as usize)
+                    };
+                    let r = Ok(KeyRingSecret(secret.to_vec()));
+                    secret.zeroize();
+                    r
+                }
+            };
         unsafe { CredFree(pcredential as *const c_void) };
         unsafe { LocalFree(Some(HLOCAL(out_blob.pbData as _))) };
         res
