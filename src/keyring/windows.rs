@@ -91,7 +91,7 @@ impl DynKeyRing for WindowsOsKeyRing {
         let mut user_name = to_utf16_bytes(&self.username);
         let mut secret_cp = secret.to_vec();
 
-        let mut in_blob = CRYPT_INTEGER_BLOB {
+        let in_blob = CRYPT_INTEGER_BLOB {
             cbData: secret.len() as u32,
             pbData: secret_cp.as_mut_ptr(),
         };
