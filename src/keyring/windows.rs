@@ -35,10 +35,6 @@ impl WindowsOsKeyRing {
         let target_name = [&self.username, &self.service, id].join(":");
         to_utf16_bytes(&target_name)
     }
-
-    fn handle_err<T>(err: ::windows::core::Error) -> Result<T> {
-        Err(KeyRingError::from(err.message().to_string().as_str()))
-    }
 }
 
 impl DynKeyRing for WindowsOsKeyRing {
