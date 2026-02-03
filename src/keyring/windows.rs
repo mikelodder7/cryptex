@@ -67,7 +67,7 @@ impl DynKeyRing for WindowsOsKeyRing {
         };
 
         let res = match unsafe {
-            CryptUnprotectData(&mut in_blob, None, None, None, None, 0, &mut out_blob)
+            CryptUnprotectData(&in_blob, None, None, None, None, 0, &mut out_blob)
         } {
             Err(_) => Err(KeyRingError::from("Windows Crypt Unprotect Data Error")),
             Ok(()) => {
@@ -132,7 +132,7 @@ impl DynKeyRing for WindowsOsKeyRing {
             TargetAlias: PWSTR(empty.as_mut_ptr()),
             UserName: PWSTR(user_name.as_mut_ptr()),
         };
-        let res = match unsafe { CredWriteW(&mut credential, 0) } {
+        let res = match unsafe { CredWriteW(&credential, 0) } {
             Err(_) => Err(KeyRingError::from("Windows Vault Error")),
             Ok(()) => Ok(()),
         };
