@@ -122,6 +122,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
+      - name: Use Strawberry Perl for OpenSSL build
+        run: echo "C:\Strawberry\perl\bin" >> $GITHUB_PATH
       - uses: actions/cache@v4
         with:
           path: |
