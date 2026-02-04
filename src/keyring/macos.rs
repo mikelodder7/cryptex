@@ -39,9 +39,6 @@ unsafe impl Send for MacOsKeyRing {}
 unsafe impl Sync for MacOsKeyRing {}
 
 impl MacOsKeyRing {
-    fn unlock(&mut self) -> Result<()> {
-        self.keychain.unlock(None).map_err(|e| e.into())
-    }
     fn get_target_name(&self, id: &str) -> String {
         [get_username(), id.to_string()].join(":")
     }
@@ -86,8 +83,7 @@ impl MacOsKeyRing {
     fn _find_all_passwords() -> Result<Vec<(String, KeyRingSecret)>> {
         let mut out = Vec::new();
 
-        let mut keychain = SecKeychain::default().map_err(KeyRingError::from)?;
-        keychain.unlock(None).map_err(KeyRingError::from)?;
+        let keychain = SecKeychain::default().map_err(KeyRingError::from)?;
 
         let secret_names = MacOsKeyRing::list_secrets()?;
 
@@ -171,11 +167,10 @@ impl DynKeyRing for MacOsKeyRing {
 
 impl NewKeyRing for MacOsKeyRing {
     fn new<S: AsRef<str>>(service: S) -> Result<Self> {
-        let mut keyring = MacOsKeyRing {
+        let keyring = MacOsKeyRing {
             keychain: SecKeychain::default().map_err(KeyRingError::from)?,
             service: service.as_ref().to_string(),
         };
-        keyring.unlock()?;
         Ok(keyring)
     }
 }
