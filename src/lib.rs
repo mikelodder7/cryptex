@@ -2,6 +2,7 @@
     Copyright Michael Lodder. All Rights Reserved.
     SPDX-License-Identifier: Apache-2.0
 */
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(
     warnings,
     unused_import_braces,
