@@ -5,6 +5,8 @@
 
 mod keyringsecret;
 
+#[cfg(any(feature = "yubihsm-usb", feature = "yubihsm-http"))]
+pub mod kms;
 #[cfg(all(target_os = "linux", feature = "linux-secret-service"))]
 pub mod linux;
 #[cfg(all(target_os = "macos", feature = "macos-keychain"))]
