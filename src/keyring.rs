@@ -13,6 +13,8 @@ pub mod macos;
 pub mod sqlcipher;
 #[cfg(all(target_os = "windows", feature = "windows-credentials"))]
 pub mod windows;
+#[cfg(any(feature = "yubihsm-usb", feature = "yubihsm-http"))]
+pub mod yubihsm;
 
 #[cfg(all(target_os = "macos", feature = "macos-keychain"))]
 #[cfg_attr(docsrs, doc(cfg(all(target_os = "macos", feature = "macos-keychain"))))]
@@ -75,6 +77,8 @@ pub fn get_os_keyring(service: &str) -> Result<OsKeyRing<'_>> {
     all(target_os = "windows", feature = "windows-credentials"),
     all(target_os = "linux", feature = "linux-secret-service"),
     feature = "file",
+    feature = "yubihsm-usb",
+    feature = "yubihsm-http",
 )))]
 compile_error!("no keyring implementation is selected or available for this platform");
 

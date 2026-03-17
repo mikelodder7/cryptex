@@ -13,7 +13,7 @@ keywords = ["secrets", "vault", "keyring"]
 license = "MIT/Apache-2.0"
 repository = "https://github.com/mikelodder7/cryptex"
 readme = "README.md"
-version = "2.0.1"
+version = "2.1.0"
 
 [package.metadata.docs.rs]
 all-features = true
@@ -27,11 +27,13 @@ name = "cryptex"
 
 [features]
 default = ["linux-secret-service", "macos-keychain", "windows-credentials"]
-file = ["argon2", "chacha20poly1305", "dirs", "rusqlite"]
+file = ["dep:argon2", "dep:chacha20poly1305", "dep:dirs", "dep:rusqlite"]
 linux-secret-service = ["secret-service", "uzers"]
 macos-keychain = ["security-framework", "security-framework-sys", "core-foundation", "core-foundation-sys", "uzers"]
 windows-credentials = ["windows"]
 serde = ["dep:serde", "postcard"]
+yubihsm-usb = ["dep:yubihsm", "yubihsm/usb", "yubihsm/passwords", "dep:aes-gcm", "dep:sha2", "dep:getrandom", "dep:dirs"]
+yubihsm-http = ["dep:yubihsm", "yubihsm/http", "yubihsm/passwords", "dep:aes-gcm", "dep:sha2", "dep:getrandom", "dep:dirs"]
 
 [dependencies]
 clap = "4"
@@ -44,10 +46,14 @@ subtle = "2"
 whoami = "2"
 zeroize = { version = "1", features = ["zeroize_derive"] }
 
+aes-gcm = { version = "0.10", optional = true }
 argon2 = { version = "0.5", optional = true }
 chacha20poly1305 = { version = "0.10", optional = true }
 dirs = { version = "6.0", optional = true }
+getrandom = { version = "0.2", optional = true }
 rusqlite = { version = "0.38", features = ["bundled-sqlcipher-vendored-openssl"], optional = true }
+sha2 = { version = "0.10", optional = true }
+yubihsm = { version = "0.42", default-features = false, optional = true }
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 uzers = { version = "0.12", optional = true }
