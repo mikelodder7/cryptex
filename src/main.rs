@@ -13,10 +13,64 @@
 
 use clap::{Arg, ArgMatches, Command};
 use colored::Colorize;
+
+// ── Imports used only when at least one active backend is compiled in ─────────
+
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+    feature = "yubihsm-usb",
+    feature = "yubihsm-http",
+))]
 use std::fs::File;
+
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+    feature = "yubihsm-usb",
+    feature = "yubihsm-http",
+))]
 use std::io::{self, IsTerminal, Read, Write};
+
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+    feature = "yubihsm-usb",
+    feature = "yubihsm-http",
+))]
 use std::path::PathBuf;
+
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+    feature = "yubihsm-usb",
+    feature = "yubihsm-http",
+))]
 use zeroize::Zeroize;
+
+// ── Shared backend imports ────────────────────────────────────────────────────
+
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+    feature = "yubihsm-usb",
+    feature = "yubihsm-http",
+))]
+use cryptex::{KeyRing, KeyRingSecret};
+
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+    feature = "yubihsm-usb",
+    feature = "yubihsm-http",
+))]
+use std::collections::BTreeMap;
 
 // ── OS keyring ────────────────────────────────────────────────────────────────
 
@@ -25,14 +79,7 @@ use zeroize::Zeroize;
     all(target_os = "windows", feature = "windows-credentials"),
     all(target_os = "linux", feature = "linux-secret-service"),
 ))]
-use cryptex::{KeyRing, KeyRingSecret, ListKeyRing, PeekableKeyRing, get_os_keyring};
-
-#[cfg(any(
-    all(target_os = "macos", feature = "macos-keychain"),
-    all(target_os = "windows", feature = "windows-credentials"),
-    all(target_os = "linux", feature = "linux-secret-service"),
-))]
-use std::collections::BTreeMap;
+use cryptex::{ListKeyRing, PeekableKeyRing, get_os_keyring};
 
 #[cfg(all(target_os = "macos", feature = "macos-keychain"))]
 use cryptex::macos::MacOsKeyRing as OsKeyRing;
@@ -46,13 +93,10 @@ use cryptex::windows::WindowsOsKeyRing as OsKeyRing;
 // ── YubiHSM ───────────────────────────────────────────────────────────────────
 
 #[cfg(any(feature = "yubihsm-usb", feature = "yubihsm-http"))]
-use cryptex::{KeyRing, KeyRingSecret, NewKeyRing};
+use cryptex::NewKeyRing;
 
 #[cfg(any(feature = "yubihsm-usb", feature = "yubihsm-http"))]
 use cryptex::yubihsm::YubiHsmKeyRing;
-
-#[cfg(any(feature = "yubihsm-usb", feature = "yubihsm-http"))]
-use std::collections::BTreeMap;
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -382,11 +426,25 @@ fn yubihsm_list(matches: &ArgMatches) {
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+    feature = "yubihsm-usb",
+    feature = "yubihsm-http",
+))]
 fn get_id(matches: &ArgMatches, read_stdin: bool) -> String {
     let bytes = read_input(matches, "ID", read_stdin);
     String::from_utf8(bytes).unwrap_or_else(|_| die("ID is not valid UTF-8"))
 }
 
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+    feature = "yubihsm-usb",
+    feature = "yubihsm-http",
+))]
 fn read_input(matches: &ArgMatches, name: &str, read_stdin: bool) -> Vec<u8> {
     match matches.get_one::<String>(name).map(|s| s.as_str()) {
         Some(text) => match get_file(text) {
@@ -414,6 +472,13 @@ fn read_input(matches: &ArgMatches, name: &str, read_stdin: bool) -> Vec<u8> {
     }
 }
 
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+    feature = "yubihsm-usb",
+    feature = "yubihsm-http",
+))]
 fn read_stream<R: Read>(f: &mut R) -> Vec<u8> {
     let mut bytes = Vec::new();
     let mut buffer = [0u8; 4096];
@@ -427,6 +492,13 @@ fn read_stream<R: Read>(f: &mut R) -> Vec<u8> {
     bytes
 }
 
+#[cfg(any(
+    all(target_os = "macos", feature = "macos-keychain"),
+    all(target_os = "windows", feature = "windows-credentials"),
+    all(target_os = "linux", feature = "linux-secret-service"),
+    feature = "yubihsm-usb",
+    feature = "yubihsm-http",
+))]
 fn get_file(name: &str) -> Option<PathBuf> {
     let mut file = PathBuf::from(name);
     if file.as_path().is_file() {
