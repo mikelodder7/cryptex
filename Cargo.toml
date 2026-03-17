@@ -13,7 +13,7 @@ keywords = ["secrets", "vault", "keyring"]
 license = "MIT/Apache-2.0"
 repository = "https://github.com/mikelodder7/cryptex"
 readme = "README.md"
-version = "2.1.0"
+version = "2.1.1"
 
 [package.metadata.docs.rs]
 all-features = true
@@ -27,7 +27,7 @@ name = "cryptex"
 
 [features]
 default = ["linux-secret-service", "macos-keychain", "windows-credentials"]
-file = ["dep:argon2", "dep:chacha20poly1305", "dep:dirs", "dep:rusqlite"]
+file = ["dep:argon2", "dep:dirs", "dep:rusqlite"]
 linux-secret-service = ["secret-service", "uzers"]
 macos-keychain = ["security-framework", "security-framework-sys", "core-foundation", "core-foundation-sys", "uzers"]
 windows-credentials = ["windows"]
