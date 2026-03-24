@@ -516,6 +516,47 @@ mod tests {
 
     #[test]
     #[ignore = "requires YubiHSM hardware"]
+    fn test_rekey_secret() {
+        let mut ring = ensure_test_key();
+
+        ring.set_secret("rekey-me", b"original value")
+            .expect("set_secret");
+
+        // Record the nonce before rekey
+        let path = ring.entry_path("rekey-me");
+        let (_, old_entry) =
+            crate::keyring::kms::read_entry_file(&path).expect("read entry before rekey");
+        let old_nonce = old_entry.nonce;
+
+        // Rekey
+        ring.rekey_secret("rekey-me").expect("rekey_secret");
+
+        // Value should be unchanged
+        let got = ring.get_secret("rekey-me").expect("get after rekey");
+        assert_eq!(got.as_slice(), b"original value");
+
+        // Nonce should have changed
+        let (_, new_entry) =
+            crate::keyring::kms::read_entry_file(&path).expect("read entry after rekey");
+        assert_ne!(old_nonce, new_entry.nonce, "nonce must change after rekey");
+    }
+
+    #[test]
+    #[ignore = "requires YubiHSM hardware"]
+    fn test_rekey_all() {
+        let mut ring = ensure_test_key();
+
+        ring.set_secret("ra", b"val-ra").expect("set ra");
+        ring.set_secret("rb", b"val-rb").expect("set rb");
+
+        ring.rekey_all().expect("rekey_all");
+
+        assert_eq!(ring.get_secret("ra").expect("get ra").as_slice(), b"val-ra");
+        assert_eq!(ring.get_secret("rb").expect("get rb").as_slice(), b"val-rb");
+    }
+
+    #[test]
+    #[ignore = "requires YubiHSM hardware"]
     fn test_nonces_are_unique() {
         let ring = ensure_test_key();
 

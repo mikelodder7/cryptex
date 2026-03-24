@@ -187,16 +187,54 @@ impl<B: KmsBackend> KmsKeyRing<B> {
         Ok(results)
     }
 
+    // ── Rekey ─────────────────────────────────────────────────────────────────
+
+    /// Re-encrypt a single secret with a freshly generated nonce.
+    ///
+    /// This decrypts the entry using the old nonce-derived key, generates a new
+    /// nonce, derives a new key from it, re-encrypts, and writes the entry back
+    /// atomically.
+    pub fn rekey_secret(&mut self, id: &str) -> Result<()> {
+        let path = self.entry_path(id);
+        let (stored_id, old_entry) =
+            read_entry_file(&path).map_err(|_| KeyRingError::ItemNotFound)?;
+        let plaintext = Zeroizing::new(self.decrypt_entry(&old_entry)?);
+        let new_nonce = self.generate_nonce()?;
+        let new_entry = self.encrypt_entry(&plaintext, new_nonce)?;
+        write_entry_file(&path, &stored_id, &new_entry)
+    }
+
+    /// Re-encrypt every secret in this keyring's service directory with fresh nonces.
+    ///
+    /// Iterates all `.bin` entry files and re-encrypts each one in place.
+    /// Returns the first error encountered (entries already rekeyed
+    /// before the failure remain rekeyed).
+    pub fn rekey_all(&mut self) -> Result<()> {
+        let entries = fs::read_dir(&self.storage_dir).map_err(io_err)?;
+        for dir_entry in entries.flatten() {
+            let path = dir_entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("bin") {
+                continue;
+            }
+            let (stored_id, old_entry) = read_entry_file(&path)?;
+            let plaintext = Zeroizing::new(self.decrypt_entry(&old_entry)?);
+            let new_nonce = self.generate_nonce()?;
+            let new_entry = self.encrypt_entry(&plaintext, new_nonce)?;
+            write_entry_file(&path, &stored_id, &new_entry)?;
+        }
+        Ok(())
+    }
+
     // ── Internal helpers ──────────────────────────────────────────────────────
 
-    fn entry_path(&self, id: &str) -> PathBuf {
+    pub(crate) fn entry_path(&self, id: &str) -> PathBuf {
         self.storage_dir.join(entry_filename(id))
     }
 
     /// Generate a 12-byte nonce from OS RNG mixed with optional backend entropy.
     pub(crate) fn generate_nonce(&self) -> Result<[u8; 12]> {
         let mut os_rand = Zeroizing::new([0u8; 32]);
-        getrandom::getrandom(os_rand.as_mut()).map_err(|e| KeyRingError::GeneralError {
+        getrandom::fill(os_rand.as_mut()).map_err(|e| KeyRingError::GeneralError {
             msg: format!("OS RNG failed: {e}"),
         })?;
 
@@ -410,7 +448,7 @@ pub(crate) fn io_err(e: io::Error) -> KeyRingError {
 
 #[cfg(test)]
 mod tests {
-    use super::Entry;
+    use super::*;
 
     #[test]
     fn test_entry_round_trip() {
@@ -436,5 +474,146 @@ mod tests {
         assert!(Entry::from_bytes(&[0u8; 2]).is_err());
         // version + key_id_len=0 but missing device_id/nonce/ct_len
         assert!(Entry::from_bytes(&[1u8, 0u8, 0u8, 0u8]).is_err());
+    }
+
+    // ── Mock backend for unit testing ────────────────────────────────────────
+
+    struct MockBackend {
+        key: [u8; 32],
+    }
+
+    impl MockBackend {
+        fn new() -> Self {
+            // Fixed key for deterministic tests
+            Self { key: [0xABu8; 32] }
+        }
+    }
+
+    impl KmsBackend for MockBackend {
+        fn backend_name(&self) -> &'static str {
+            "mock"
+        }
+
+        fn key_id(&self) -> &str {
+            "mock-key-1"
+        }
+
+        fn device_id(&self) -> [u8; 16] {
+            [0x42u8; 16]
+        }
+
+        fn get_random(&self, n: usize) -> Result<Vec<u8>> {
+            // Return pseudo-random bytes (different each call via OS RNG)
+            let mut buf = vec![0u8; n];
+            getrandom::fill(&mut buf).map_err(|e| KeyRingError::GeneralError {
+                msg: format!("RNG failed: {e}"),
+            })?;
+            Ok(buf)
+        }
+
+        fn hmac_sha256(&self, msg: Vec<u8>) -> Result<[u8; 32]> {
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(&self.key);
+            hasher.update(&msg);
+            let result = hasher.finalize();
+            let mut out = [0u8; 32];
+            out.copy_from_slice(&result);
+            Ok(out)
+        }
+    }
+
+    fn mock_ring(name: &str) -> KmsKeyRing<MockBackend> {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(".test_kms_{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::create_dir_all(&dir);
+        KmsKeyRing {
+            backend: MockBackend::new(),
+            storage_dir: dir,
+        }
+    }
+
+    #[test]
+    fn test_rekey_secret_round_trip() {
+        let mut ring = mock_ring("roundtrip");
+
+        // Set a secret
+        DynKeyRing::set_secret(&mut ring, "rekey-test", b"hello rekey").unwrap();
+
+        // Read the nonce before rekey
+        let path = ring.entry_path("rekey-test");
+        let (_, old_entry) = read_entry_file(&path).unwrap();
+        let old_nonce = old_entry.nonce;
+
+        // Rekey the secret
+        ring.rekey_secret("rekey-test").unwrap();
+
+        // Verify plaintext is preserved
+        let secret = DynKeyRing::get_secret(&mut ring, "rekey-test").unwrap();
+        assert_eq!(secret.as_slice(), b"hello rekey");
+
+        // Verify the nonce changed
+        let (_, new_entry) = read_entry_file(&path).unwrap();
+        assert_ne!(
+            old_nonce, new_entry.nonce,
+            "nonce should change after rekey"
+        );
+
+        // Cleanup
+        let _ = fs::remove_dir_all(&ring.storage_dir);
+    }
+
+    #[test]
+    fn test_rekey_secret_not_found() {
+        let mut ring = mock_ring("notfound");
+        let err = ring
+            .rekey_secret("nonexistent")
+            .expect_err("should fail for missing entry");
+        assert!(
+            matches!(err, KeyRingError::ItemNotFound),
+            "expected ItemNotFound, got: {:?}",
+            err
+        );
+        let _ = fs::remove_dir_all(&ring.storage_dir);
+    }
+
+    #[test]
+    fn test_rekey_all() {
+        let mut ring = mock_ring("rekeyall");
+
+        DynKeyRing::set_secret(&mut ring, "a", b"alpha").unwrap();
+        DynKeyRing::set_secret(&mut ring, "b", b"beta").unwrap();
+        DynKeyRing::set_secret(&mut ring, "c", b"gamma").unwrap();
+
+        // Record old nonces
+        let old_nonce_a = read_entry_file(&ring.entry_path("a")).unwrap().1.nonce;
+        let old_nonce_b = read_entry_file(&ring.entry_path("b")).unwrap().1.nonce;
+        let old_nonce_c = read_entry_file(&ring.entry_path("c")).unwrap().1.nonce;
+
+        ring.rekey_all().unwrap();
+
+        // All secrets should still be readable
+        assert_eq!(
+            DynKeyRing::get_secret(&mut ring, "a").unwrap().as_slice(),
+            b"alpha"
+        );
+        assert_eq!(
+            DynKeyRing::get_secret(&mut ring, "b").unwrap().as_slice(),
+            b"beta"
+        );
+        assert_eq!(
+            DynKeyRing::get_secret(&mut ring, "c").unwrap().as_slice(),
+            b"gamma"
+        );
+
+        // All nonces should have changed
+        let new_nonce_a = read_entry_file(&ring.entry_path("a")).unwrap().1.nonce;
+        let new_nonce_b = read_entry_file(&ring.entry_path("b")).unwrap().1.nonce;
+        let new_nonce_c = read_entry_file(&ring.entry_path("c")).unwrap().1.nonce;
+        assert_ne!(old_nonce_a, new_nonce_a);
+        assert_ne!(old_nonce_b, new_nonce_b);
+        assert_ne!(old_nonce_c, new_nonce_c);
+
+        let _ = fs::remove_dir_all(&ring.storage_dir);
     }
 }
