@@ -28,7 +28,7 @@ name = "cryptex"
 [features]
 default = ["linux-secret-service", "macos-keychain", "windows-credentials"]
 file = ["dep:argon2", "dep:dirs", "dep:rusqlite", "rusqlite/bundled-sqlcipher-vendored-openssl"]
-encrypted-vfs = ["dep:argon2", "dep:dirs", "dep:rusqlite", "rusqlite/bundled", "dep:chacha20poly1305", "dep:sqlite-plugin", "sqlite-plugin/static", "dep:getrandom"]
+encrypted-vfs = ["dep:argon2", "dep:dirs", "dep:rusqlite", "rusqlite/bundled", "dep:chacha20poly1305", "dep:aes-gcm", "dep:sqlite-plugin", "sqlite-plugin/static", "dep:getrandom"]
 linux-secret-service = ["secret-service", "uzers"]
 macos-keychain = ["security-framework", "security-framework-sys", "core-foundation", "core-foundation-sys", "uzers"]
 windows-credentials = ["windows"]
@@ -49,12 +49,20 @@ postcard = { version = "1", features = ["use-std"], optional = true }
 rpassword = "7"
 rusqlite = { version = "0.39", default-features = false, optional = true }
 serde = { version = "1", optional = true }
-sha2 = { version = "0.10", optional = true }
+sha2 = { version = "0.11", optional = true }
 sqlite-plugin = { version = "0.10", optional = true }
 subtle = "2"
 whoami = "2"
 yubihsm = { version = "0.42", default-features = false, optional = true }
 zeroize = { version = "1", features = ["zeroize_derive"] }
+
+[dev-dependencies]
+criterion = { version = "0.8", features = ["html_reports"] }
+
+[[bench]]
+name = "cipher_bench"
+harness = false
+required-features = ["encrypted-vfs"]
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 uzers = { version = "0.12", optional = true }

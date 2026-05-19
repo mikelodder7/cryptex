@@ -3,6 +3,7 @@
     SPDX-License-Identifier: Apache-2.0
 */
 use super::*;
+use aes_gcm::Aes256Gcm;
 use argon2::{Algorithm, Argon2, Params as Argon2Params, Version};
 use chacha20poly1305::{
     ChaCha20Poly1305,
@@ -23,6 +24,8 @@ use zeroize::{Zeroize, Zeroizing};
 
 use crate::error::KeyRingError;
 
+// ─── Page constants ───────────────────────────────────────────────────────────
+
 const LOGICAL_PAGE_SIZE: usize = 4096;
 const NONCE_SIZE: usize = 12;
 const TAG_SIZE: usize = 16;
@@ -31,8 +34,126 @@ const PHYSICAL_PAGE_SIZE: usize = LOGICAL_PAGE_SIZE + NONCE_SIZE + TAG_SIZE; // 
 
 static VFS_COUNTER: AtomicU32 = AtomicU32::new(0);
 
+// ─── Cipher selection ─────────────────────────────────────────────────────────
+
+/// Selects the AEAD algorithm used by [`EncryptedVfsKeyring`].
+///
+/// `Aes256Gcm` uses AES-NI hardware acceleration on x86/x86_64/AArch64 when
+/// available; on hardware without AES-NI it falls back to a constant-time
+/// software implementation that is slower than ChaCha20-Poly1305.
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub enum CipherAlgorithm {
+    #[default]
+    ChaCha20Poly1305,
+    Aes256Gcm,
+}
+
+impl Zeroize for CipherAlgorithm {
+    fn zeroize(&mut self) {
+        *self = CipherAlgorithm::default();
+    }
+}
+
+// Internal dispatch — one variant per algorithm.  Both use 12-byte nonces and
+// 16-byte tags so the physical page layout is identical regardless of choice.
+enum ActiveCipher {
+    ChaCha(ChaCha20Poly1305),
+    Aes(Aes256Gcm),
+}
+
+impl ActiveCipher {
+    fn from_key(alg: CipherAlgorithm, key: &[u8; 32]) -> Self {
+        match alg {
+            CipherAlgorithm::ChaCha20Poly1305 => Self::ChaCha(ChaCha20Poly1305::new(key.into())),
+            CipherAlgorithm::Aes256Gcm => Self::Aes(Aes256Gcm::new(key.into())),
+        }
+    }
+
+    fn encrypt_page(
+        &self,
+        page_no: u64,
+        plaintext: &[u8; LOGICAL_PAGE_SIZE],
+    ) -> std::io::Result<[u8; PHYSICAL_PAGE_SIZE]> {
+        let mut nonce_bytes = [0u8; NONCE_SIZE];
+        getrandom::fill(&mut nonce_bytes)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+
+        // chacha20poly1305::Nonce == GenericArray<u8, U12>, same type expected by
+        // Aes256Gcm — both ciphers resolve to the same aead 0.5 generic_array dep.
+        let nonce = chacha20poly1305::Nonce::from_slice(&nonce_bytes);
+        let aad = page_no.to_le_bytes();
+
+        let ct = match self {
+            Self::ChaCha(c) => c.encrypt(
+                nonce,
+                Payload {
+                    msg: plaintext.as_slice(),
+                    aad: &aad,
+                },
+            ),
+            Self::Aes(c) => c.encrypt(
+                nonce,
+                Payload {
+                    msg: plaintext.as_slice(),
+                    aad: &aad,
+                },
+            ),
+        }
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "encryption failed"))?;
+
+        // Layout: [ciphertext(4096) | nonce(12) | tag(16)]
+        let mut block = [0u8; PHYSICAL_PAGE_SIZE];
+        block[..LOGICAL_PAGE_SIZE].copy_from_slice(&ct[..LOGICAL_PAGE_SIZE]);
+        block[LOGICAL_PAGE_SIZE..LOGICAL_PAGE_SIZE + NONCE_SIZE].copy_from_slice(&nonce_bytes);
+        block[LOGICAL_PAGE_SIZE + NONCE_SIZE..].copy_from_slice(&ct[LOGICAL_PAGE_SIZE..]);
+        Ok(block)
+    }
+
+    fn decrypt_page(
+        &self,
+        page_no: u64,
+        block: &[u8; PHYSICAL_PAGE_SIZE],
+    ) -> std::io::Result<[u8; LOGICAL_PAGE_SIZE]> {
+        let ciphertext_part = &block[..LOGICAL_PAGE_SIZE];
+        let nonce_bytes = &block[LOGICAL_PAGE_SIZE..LOGICAL_PAGE_SIZE + NONCE_SIZE];
+        let tag = &block[LOGICAL_PAGE_SIZE + NONCE_SIZE..];
+
+        let mut ct_with_tag = Vec::with_capacity(LOGICAL_PAGE_SIZE + TAG_SIZE);
+        ct_with_tag.extend_from_slice(ciphertext_part);
+        ct_with_tag.extend_from_slice(tag);
+
+        let nonce = chacha20poly1305::Nonce::from_slice(nonce_bytes);
+        let aad = page_no.to_le_bytes();
+
+        let pt = match self {
+            Self::ChaCha(c) => c.decrypt(
+                nonce,
+                Payload {
+                    msg: &ct_with_tag,
+                    aad: &aad,
+                },
+            ),
+            Self::Aes(c) => c.decrypt(
+                nonce,
+                Payload {
+                    msg: &ct_with_tag,
+                    aad: &aad,
+                },
+            ),
+        }
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "decryption failed"))?;
+
+        let mut result = [0u8; LOGICAL_PAGE_SIZE];
+        result.copy_from_slice(&pt);
+        Ok(result)
+    }
+}
+
+// ─── VFS state ────────────────────────────────────────────────────────────────
+
 struct VfsState {
-    cipher: ChaCha20Poly1305,
+    alg: CipherAlgorithm,
+    cipher: ActiveCipher,
 }
 
 #[derive(Clone)]
@@ -41,19 +162,21 @@ pub(crate) struct EncryptedVfs {
 }
 
 impl EncryptedVfs {
-    fn new(key: &[u8; 32]) -> Self {
+    fn new(alg: CipherAlgorithm, key: &[u8; 32]) -> Self {
         Self {
             state: Arc::new(RwLock::new(VfsState {
-                cipher: ChaCha20Poly1305::new(key.into()),
+                alg,
+                cipher: ActiveCipher::from_key(alg, key),
             })),
         }
     }
 
-    fn rotate_key(&self, key: &[u8; 32]) -> Result<()> {
+    fn rotate_key(&self, alg: CipherAlgorithm, key: &[u8; 32]) -> Result<()> {
         let mut state = self.state.write().map_err(|_| KeyRingError::GeneralError {
             msg: "VFS state lock poisoned".to_string(),
         })?;
-        state.cipher = ChaCha20Poly1305::new(key.into());
+        state.alg = alg;
+        state.cipher = ActiveCipher::from_key(alg, key);
         Ok(())
     }
 }
@@ -96,7 +219,6 @@ impl Vfs for EncryptedVfs {
                 (f, Some(pb))
             }
             None => {
-                // Temporary file: create in system temp dir with a unique name
                 let mut tmp = std::env::temp_dir();
                 tmp.push(format!(
                     "cryptex-tmp-{}-{}.db",
@@ -178,7 +300,6 @@ impl Vfs for EncryptedVfs {
                 .len();
 
             if physical_offset >= file_len {
-                // Beyond EOF — return zeros (uninitialized page)
                 data[buf_pos..buf_pos + take].fill(0);
             } else {
                 let mut block = [0u8; PHYSICAL_PAGE_SIZE];
@@ -191,7 +312,9 @@ impl Vfs for EncryptedVfs {
                     .read_exact(&mut block)
                     .map_err(|_| sqlite_plugin::vars::SQLITE_IOERR_READ)?;
 
-                let plaintext = decrypt_page(&state.cipher, page_no as u64, &block)
+                let plaintext = state
+                    .cipher
+                    .decrypt_page(page_no as u64, &block)
                     .map_err(|_| sqlite_plugin::vars::SQLITE_IOERR_READ)?;
 
                 data[buf_pos..buf_pos + take].copy_from_slice(&plaintext[intra..intra + take]);
@@ -223,12 +346,10 @@ impl Vfs for EncryptedVfs {
             let take = remaining.min(LOGICAL_PAGE_SIZE - intra);
 
             let plaintext: [u8; LOGICAL_PAGE_SIZE] = if intra == 0 && take == LOGICAL_PAGE_SIZE {
-                // Full-page write — no read needed
                 let mut p = [0u8; LOGICAL_PAGE_SIZE];
                 p.copy_from_slice(&data[buf_pos..buf_pos + LOGICAL_PAGE_SIZE]);
                 p
             } else {
-                // Sub-page write: read-decrypt-modify-encrypt
                 let physical_offset = (page_no * PHYSICAL_PAGE_SIZE) as u64;
                 let file_len = handle
                     .file
@@ -247,14 +368,18 @@ impl Vfs for EncryptedVfs {
                         .file
                         .read_exact(&mut block)
                         .map_err(|_| sqlite_plugin::vars::SQLITE_IOERR_WRITE)?;
-                    p = decrypt_page(&state.cipher, page_no as u64, &block)
+                    p = state
+                        .cipher
+                        .decrypt_page(page_no as u64, &block)
                         .map_err(|_| sqlite_plugin::vars::SQLITE_IOERR_WRITE)?;
                 }
                 p[intra..intra + take].copy_from_slice(&data[buf_pos..buf_pos + take]);
                 p
             };
 
-            let block = encrypt_page(&state.cipher, page_no as u64, &plaintext)
+            let block = state
+                .cipher
+                .encrypt_page(page_no as u64, &plaintext)
                 .map_err(|_| sqlite_plugin::vars::SQLITE_IOERR_WRITE)?;
 
             let physical_offset = (page_no * PHYSICAL_PAGE_SIZE) as u64;
@@ -294,71 +419,6 @@ impl Vfs for EncryptedVfs {
     fn check_reserved_lock(&self, _handle: &mut Self::Handle) -> VfsResult<bool> {
         Ok(false)
     }
-}
-
-// ─── Crypto helpers ───────────────────────────────────────────────────────────
-
-fn encrypt_page(
-    cipher: &ChaCha20Poly1305,
-    page_no: u64,
-    plaintext: &[u8; LOGICAL_PAGE_SIZE],
-) -> std::io::Result<[u8; PHYSICAL_PAGE_SIZE]> {
-    let mut nonce_bytes = [0u8; NONCE_SIZE];
-    getrandom::fill(&mut nonce_bytes)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
-
-    let nonce = chacha20poly1305::Nonce::from_slice(&nonce_bytes);
-    let aad = page_no.to_le_bytes();
-
-    // cipher.encrypt returns ciphertext || tag (4096 + 16 = 4112 bytes)
-    let ct = cipher
-        .encrypt(
-            nonce,
-            Payload {
-                msg: plaintext.as_slice(),
-                aad: &aad,
-            },
-        )
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "encryption failed"))?;
-
-    // Physical layout: [ciphertext(4096) | nonce(12) | tag(16)]
-    let mut block = [0u8; PHYSICAL_PAGE_SIZE];
-    block[..LOGICAL_PAGE_SIZE].copy_from_slice(&ct[..LOGICAL_PAGE_SIZE]);
-    block[LOGICAL_PAGE_SIZE..LOGICAL_PAGE_SIZE + NONCE_SIZE].copy_from_slice(&nonce_bytes);
-    block[LOGICAL_PAGE_SIZE + NONCE_SIZE..].copy_from_slice(&ct[LOGICAL_PAGE_SIZE..]);
-    Ok(block)
-}
-
-fn decrypt_page(
-    cipher: &ChaCha20Poly1305,
-    page_no: u64,
-    block: &[u8; PHYSICAL_PAGE_SIZE],
-) -> std::io::Result<[u8; LOGICAL_PAGE_SIZE]> {
-    let ciphertext_part = &block[..LOGICAL_PAGE_SIZE];
-    let nonce_bytes = &block[LOGICAL_PAGE_SIZE..LOGICAL_PAGE_SIZE + NONCE_SIZE];
-    let tag = &block[LOGICAL_PAGE_SIZE + NONCE_SIZE..];
-
-    // Reassemble ciphertext || tag for AEAD
-    let mut ct_with_tag = Vec::with_capacity(LOGICAL_PAGE_SIZE + TAG_SIZE);
-    ct_with_tag.extend_from_slice(ciphertext_part);
-    ct_with_tag.extend_from_slice(tag);
-
-    let nonce = chacha20poly1305::Nonce::from_slice(nonce_bytes);
-    let aad = page_no.to_le_bytes();
-
-    let pt = cipher
-        .decrypt(
-            nonce,
-            Payload {
-                msg: &ct_with_tag,
-                aad: &aad,
-            },
-        )
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "decryption failed"))?;
-
-    let mut result = [0u8; LOGICAL_PAGE_SIZE];
-    result.copy_from_slice(&pt);
-    Ok(result)
 }
 
 // ─── VFS registration ─────────────────────────────────────────────────────────
@@ -446,10 +506,10 @@ impl EncryptedVfsKeyring {
         let mut key_bytes = [0u8; 32];
         key_bytes.copy_from_slice(&key_zeroizing);
 
-        let vfs = EncryptedVfs::new(&key_bytes);
+        let vfs = EncryptedVfs::new(connection.cipher, &key_bytes);
         key_bytes.zeroize();
 
-        let vfs_for_keyring = vfs.clone(); // shares Arc<RwLock<VfsState>> with the registered copy
+        let vfs_for_keyring = vfs.clone();
         let vfs_name = register_encrypted_vfs(vfs)?;
         let db_path = get_keyring_file(path);
 
@@ -460,7 +520,6 @@ impl EncryptedVfsKeyring {
         )
         .map_err(|e| KeyRingError::GeneralError { msg: e.to_string() })?;
 
-        // Verify key correctness — wrong key causes decryption failure on first page read
         conn.query_row("SELECT COUNT(*) FROM `sqlite_master`;", params![], |_| {
             Ok(())
         })
@@ -482,10 +541,10 @@ impl EncryptedVfsKeyring {
         })
     }
 
-    /// Re-encrypt the entire database with a new key derived from `new_params`.
+    /// Re-encrypt the database with a new key (and optionally a different cipher).
     ///
-    /// Safe: writes to a temp file first, then atomically renames.
-    /// If the process dies mid-rekey the original database is untouched.
+    /// Writes to a temp file first, then atomically renames — original is
+    /// untouched until the rename succeeds.
     pub fn rekey(&self, new_params: &ConnectionParams) -> Result<()> {
         let new_key_zeroizing = derive_key(new_params);
         if new_key_zeroizing.len() != 32 {
@@ -495,7 +554,7 @@ impl EncryptedVfsKeyring {
         }
         let mut new_key = [0u8; 32];
         new_key.copy_from_slice(&new_key_zeroizing);
-        let new_cipher = ChaCha20Poly1305::new((&new_key).into());
+        let new_cipher = ActiveCipher::from_key(new_params.cipher, &new_key);
 
         let page_count: u32 = self
             .conn
@@ -529,15 +588,14 @@ impl EncryptedVfsKeyring {
                 .read_exact(&mut src_block)
                 .map_err(|e| KeyRingError::GeneralError { msg: e.to_string() })?;
 
-            // Decrypt with current key
-            let plaintext = decrypt_page(&state.cipher, page_no, &src_block).map_err(|e| {
-                KeyRingError::GeneralError {
+            let plaintext = state
+                .cipher
+                .decrypt_page(page_no, &src_block)
+                .map_err(|e| KeyRingError::GeneralError {
                     msg: format!("rekey decrypt page {}: {}", page_no, e),
-                }
-            })?;
+                })?;
 
-            // Re-encrypt with new key + fresh random nonce
-            let new_block = encrypt_page(&new_cipher, page_no, &plaintext).map_err(|e| {
+            let new_block = new_cipher.encrypt_page(page_no, &plaintext).map_err(|e| {
                 KeyRingError::GeneralError {
                     msg: format!("rekey encrypt page {}: {}", page_no, e),
                 }
@@ -555,19 +613,17 @@ impl EncryptedVfsKeyring {
             .map_err(|e| KeyRingError::GeneralError { msg: e.to_string() })?;
         drop(dst);
 
-        // Atomic swap — original is untouched until this succeeds
         fs::rename(&tmp_path, &self.db_path)
             .map_err(|e| KeyRingError::GeneralError { msg: e.to_string() })?;
 
-        // Rotate the live VFS cipher so subsequent operations use the new key
-        self.vfs.rotate_key(&new_key)?;
+        self.vfs.rotate_key(new_params.cipher, &new_key)?;
         new_key.zeroize();
 
         Ok(())
     }
 }
 
-// ─── ConnectionParams (mirrored from sqlcipher.rs, independent of that feature) ─
+// ─── Key derivation & path helpers ───────────────────────────────────────────
 
 fn derive_key(params: &ConnectionParams) -> Zeroizing<Vec<u8>> {
     if params.key.is_empty() {
@@ -638,13 +694,14 @@ fn make_hidden(path: &Path) {
 #[cfg(not(target_os = "windows"))]
 fn make_hidden(_path: &Path) {}
 
-/// Connection parameters for `EncryptedVfsKeyring`.
+// ─── ConnectionParams ─────────────────────────────────────────────────────────
+
+/// Connection parameters for [`EncryptedVfsKeyring`].
 ///
-/// Accepts the same string format as `SqlCipherKeyring`:
+/// Accepted format:
 /// ```text
-/// password=mysecret salt=0okm9ijn8uhb7ygv
+/// password=mysecret salt=0okm9ijn8uhb7ygv [cipher=chacha20poly1305|aes256gcm]
 /// ```
-#[derive(Zeroize)]
 pub struct ConnectionParams {
     pub key: Vec<u8>,
     pub password: Vec<u8>,
@@ -652,6 +709,8 @@ pub struct ConnectionParams {
     pub memory: u32,
     pub threads: u32,
     pub parallel: u32,
+    /// Cipher algorithm — default is `ChaCha20Poly1305`.
+    pub cipher: CipherAlgorithm,
 }
 
 impl Default for ConnectionParams {
@@ -664,6 +723,7 @@ impl Default for ConnectionParams {
             memory: m_cost,
             threads: Argon2Params::DEFAULT_T_COST,
             parallel: Argon2Params::DEFAULT_P_COST,
+            cipher: CipherAlgorithm::default(),
         }
     }
 }
@@ -690,6 +750,20 @@ impl ConnectionParams {
             "key" => self.key = hex::decode(value).unwrap(),
             "password" => self.password = value.as_bytes().to_vec(),
             "salt" => self.salt = value.as_bytes().to_vec(),
+            "cipher" => {
+                self.cipher = match value {
+                    "chacha20poly1305" | "chacha20" => CipherAlgorithm::ChaCha20Poly1305,
+                    "aes256gcm" | "aes" => CipherAlgorithm::Aes256Gcm,
+                    other => {
+                        return Err(KeyRingError::GeneralError {
+                            msg: format!(
+                                "unknown cipher '{}'; use chacha20poly1305 or aes256gcm",
+                                other
+                            ),
+                        });
+                    }
+                };
+            }
             "memory" => {
                 let m = value
                     .parse::<u32>()
@@ -761,7 +835,7 @@ fn get_default_memory_cost() -> u32 {
     19_917_824
 }
 
-// ─── Parser (identical to sqlcipher.rs) ──────────────────────────────────────
+// ─── Parser ───────────────────────────────────────────────────────────────────
 
 struct Parser<'a> {
     s: &'a str,
@@ -905,22 +979,24 @@ impl<'a> Parser<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ConnectionParams, EncryptedVfsKeyring};
+    use super::{CipherAlgorithm, ConnectionParams, EncryptedVfsKeyring};
     use crate::KeyRing;
     use std::fs;
     use std::path::PathBuf;
+
+    fn params(s: &str) -> ConnectionParams {
+        s.parse().unwrap()
+    }
 
     #[test]
     fn works() {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".test-evfs-works");
         let _ = fs::remove_dir_all(&path);
 
-        let params = "password=works_test salt=1qaz2wsx3edc4rfv5tgb"
-            .parse::<ConnectionParams>()
-            .unwrap();
+        let p = params("password=works_test salt=1qaz2wsx3edc4rfv5tgb");
 
         {
-            let res = EncryptedVfsKeyring::with_params(&params, Some(path.clone()));
+            let res = EncryptedVfsKeyring::with_params(&p, Some(path.clone()));
             assert!(res.is_ok(), "open failed: {:?}", res.err());
             let mut kr = res.unwrap();
 
@@ -935,7 +1011,7 @@ mod tests {
         }
 
         {
-            let mut kr = EncryptedVfsKeyring::with_params(&params, Some(path.clone())).unwrap();
+            let mut kr = EncryptedVfsKeyring::with_params(&p, Some(path.clone())).unwrap();
             let got = kr.get_secret("persist").unwrap();
             assert_eq!(got.0, b"persisted");
         }
@@ -948,12 +1024,8 @@ mod tests {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".test-evfs-wrongkey");
         let _ = fs::remove_dir_all(&path);
 
-        let correct = "password=correct_password salt=1qaz2wsx3edc4rfv5tgb"
-            .parse::<ConnectionParams>()
-            .unwrap();
-        let wrong = "password=wrong_password salt=1qaz2wsx3edc4rfv5tgb"
-            .parse::<ConnectionParams>()
-            .unwrap();
+        let correct = params("password=correct_password salt=1qaz2wsx3edc4rfv5tgb");
+        let wrong = params("password=wrong_password salt=1qaz2wsx3edc4rfv5tgb");
 
         {
             let mut kr = EncryptedVfsKeyring::with_params(&correct, Some(path.clone())).unwrap();
@@ -973,12 +1045,8 @@ mod tests {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".test-evfs-rekey");
         let _ = fs::remove_dir_all(&path);
 
-        let old_params = "password=old_pass salt=old_salt_value_here_"
-            .parse::<ConnectionParams>()
-            .unwrap();
-        let new_params = "password=new_pass salt=new_salt_value_here_"
-            .parse::<ConnectionParams>()
-            .unwrap();
+        let old_params = params("password=old_pass salt=old_salt_value_here_");
+        let new_params = params("password=new_pass salt=new_salt_value_here_");
 
         {
             let mut kr = EncryptedVfsKeyring::with_params(&old_params, Some(path.clone())).unwrap();
@@ -1004,9 +1072,7 @@ mod tests {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".test-evfs-bulk");
         let _ = fs::remove_dir_all(&path);
 
-        let params = "password=bulk_test salt=bulk_salt_value_here_"
-            .parse::<ConnectionParams>()
-            .unwrap();
+        let p = params("password=bulk_test salt=bulk_salt_value_here_");
 
         let entries: Vec<(String, Vec<u8>)> = (0..50)
             .map(|i| {
@@ -1018,14 +1084,49 @@ mod tests {
             .collect();
 
         {
-            let mut kr = EncryptedVfsKeyring::with_params(&params, Some(path.clone())).unwrap();
+            let mut kr = EncryptedVfsKeyring::with_params(&p, Some(path.clone())).unwrap();
             for (k, v) in &entries {
                 kr.set_secret(k, v).unwrap();
             }
         }
 
         {
-            let mut kr = EncryptedVfsKeyring::with_params(&params, Some(path.clone())).unwrap();
+            let mut kr = EncryptedVfsKeyring::with_params(&p, Some(path.clone())).unwrap();
+            for (k, v) in &entries {
+                let got = kr.get_secret(k).unwrap();
+                assert_eq!(&got.0, v, "mismatch for {k}");
+            }
+        }
+
+        let _ = fs::remove_dir_all(&path);
+    }
+
+    #[test]
+    fn aes_bulk_insert_and_retrieve() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".test-evfs-aes-bulk");
+        let _ = fs::remove_dir_all(&path);
+
+        let p = params("password=aes_bulk_test salt=aes_bulk_salt_here_ cipher=aes256gcm");
+        assert_eq!(p.cipher, CipherAlgorithm::Aes256Gcm);
+
+        let entries: Vec<(String, Vec<u8>)> = (0..50)
+            .map(|i| {
+                (
+                    format!("key_{:02}", i),
+                    format!("value_{:06}", i).into_bytes(),
+                )
+            })
+            .collect();
+
+        {
+            let mut kr = EncryptedVfsKeyring::with_params(&p, Some(path.clone())).unwrap();
+            for (k, v) in &entries {
+                kr.set_secret(k, v).unwrap();
+            }
+        }
+
+        {
+            let mut kr = EncryptedVfsKeyring::with_params(&p, Some(path.clone())).unwrap();
             for (k, v) in &entries {
                 let got = kr.get_secret(k).unwrap();
                 assert_eq!(&got.0, v, "mismatch for {k}");
