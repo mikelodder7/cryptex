@@ -243,7 +243,9 @@ impl Vfs for EncryptedVfs {
     }
 
     fn close(&self, handle: Self::Handle) -> VfsResult<()> {
-        if handle.delete_on_close && let Some(p) = &handle.path {
+        if handle.delete_on_close
+            && let Some(p) = &handle.path
+        {
             let _ = fs::remove_file(p);
         }
         Ok(())
