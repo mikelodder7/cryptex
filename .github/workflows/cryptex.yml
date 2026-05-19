@@ -42,6 +42,7 @@ jobs:
       - run: cargo clippy --features=serde -- -D warnings
       - run: cargo clippy --no-default-features --features=file -- -D warnings
       - run: cargo clippy --no-default-features --features "linux-secret-service,file" -- -D warnings
+      - run: cargo clippy --no-default-features --features encrypted-vfs -- -D warnings
 
   clippy-macos:
     runs-on: macos-latest
@@ -54,6 +55,7 @@ jobs:
       - run: cargo clippy --no-default-features --features macos-keychain -- -D warnings
       - run: cargo clippy --no-default-features --features file -- -D warnings
       - run: cargo clippy --no-default-features --features "macos-keychain,file" -- -D warnings
+      - run: cargo clippy --no-default-features --features encrypted-vfs -- -D warnings
 
   clippy-windows:
     runs-on: windows-latest
@@ -70,6 +72,7 @@ jobs:
       - run: cargo clippy --no-default-features --features windows-credentials -- -D warnings
       - run: cargo clippy --no-default-features --features file -- -D warnings
       - run: cargo clippy --no-default-features --features "windows-credentials,file" -- -D warnings
+      - run: cargo clippy --no-default-features --features encrypted-vfs -- -D warnings
 
   rustfmt-linux:
     runs-on: ubuntu-latest
@@ -109,6 +112,7 @@ jobs:
         with:
           toolchain: stable
       - run: cargo doc --no-default-features --features "linux-secret-service,file"
+      - run: cargo doc --no-default-features --features encrypted-vfs
 
   doc-macos:
     runs-on: macos-latest
@@ -118,6 +122,7 @@ jobs:
         with:
           toolchain: stable
       - run: cargo doc --no-default-features --features "macos-keychain,file"
+      - run: cargo doc --no-default-features --features encrypted-vfs
 
   doc-windows:
     runs-on: windows-latest
@@ -131,6 +136,7 @@ jobs:
           echo "C:\Strawberry\perl\bin" >> $GITHUB_PATH
           rm -f /usr/bin/perl
       - run: cargo doc --no-default-features --features "windows-credentials,file"
+      - run: cargo doc --no-default-features --features encrypted-vfs
 
   linux:
     runs-on: ubuntu-latest
@@ -143,6 +149,8 @@ jobs:
             cache-key: file
           - features: "linux-secret-service,file"
             cache-key: linux-secret-service-file
+          - features: encrypted-vfs
+            cache-key: encrypted-vfs
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -172,6 +180,8 @@ jobs:
             cache-key: file
           - features: "macos-keychain,file"
             cache-key: macos-keychain-file
+          - features: encrypted-vfs
+            cache-key: encrypted-vfs
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -201,6 +211,8 @@ jobs:
             cache-key: file
           - features: "windows-credentials,file"
             cache-key: windows-credentials-file
+          - features: encrypted-vfs
+            cache-key: encrypted-vfs
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -232,7 +244,8 @@ jobs:
           toolchain: nightly
       - uses: cargo-bins/cargo-binstall@main
       - run: cargo binstall --no-confirm cargo-udeps
-      - run: cargo udeps --features=file,serde
+      - run: cargo udeps --no-default-features --features=file,serde
+      - run: cargo udeps --no-default-features --features=encrypted-vfs
   
   outdated:
     runs-on: ubuntu-latest

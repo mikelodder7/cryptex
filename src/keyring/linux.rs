@@ -165,7 +165,7 @@ impl<'a> ListKeyRing for LinuxOsKeyRing<'a> {
         for item in &items {
             match item.get_attributes() {
                 Ok(atts) => {
-                    out.push(BTreeMap::from_iter(atts.into_iter()));
+                    out.push(BTreeMap::from_iter(atts));
                 }
                 Err(e) => {
                     if !out.is_empty() {
