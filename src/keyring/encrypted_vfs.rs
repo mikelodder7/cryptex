@@ -14,7 +14,7 @@ use sqlite_plugin::flags::{AccessFlags, LockLevel, OpenOpts};
 use sqlite_plugin::vfs::{RegisterOpts, Vfs, VfsHandle, VfsResult, register_static};
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
-use std::io::{Read as IoRead, Seek, SeekFrom, Write as IoWrite};
+use std::io::{self, Read as IoRead, Seek, SeekFrom, Write as IoWrite};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -58,14 +58,14 @@ impl Zeroize for CipherAlgorithm {
 // 16-byte tags so the physical page layout is identical regardless of choice.
 enum ActiveCipher {
     ChaCha(ChaCha20Poly1305),
-    Aes(Aes256Gcm),
+    Aes(Box<Aes256Gcm>),
 }
 
 impl ActiveCipher {
     fn from_key(alg: CipherAlgorithm, key: &[u8; 32]) -> Self {
         match alg {
             CipherAlgorithm::ChaCha20Poly1305 => Self::ChaCha(ChaCha20Poly1305::new(key.into())),
-            CipherAlgorithm::Aes256Gcm => Self::Aes(Aes256Gcm::new(key.into())),
+            CipherAlgorithm::Aes256Gcm => Self::Aes(Box::new(Aes256Gcm::new(key.into()))),
         }
     }
 
@@ -73,10 +73,9 @@ impl ActiveCipher {
         &self,
         page_no: u64,
         plaintext: &[u8; LOGICAL_PAGE_SIZE],
-    ) -> std::io::Result<[u8; PHYSICAL_PAGE_SIZE]> {
+    ) -> io::Result<[u8; PHYSICAL_PAGE_SIZE]> {
         let mut nonce_bytes = [0u8; NONCE_SIZE];
-        getrandom::fill(&mut nonce_bytes)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        getrandom::fill(&mut nonce_bytes).map_err(|e| io::Error::other(e.to_string()))?;
 
         // chacha20poly1305::Nonce == GenericArray<u8, U12>, same type expected by
         // Aes256Gcm — both ciphers resolve to the same aead 0.5 generic_array dep.
@@ -99,7 +98,7 @@ impl ActiveCipher {
                 },
             ),
         }
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "encryption failed"))?;
+        .map_err(|_| io::Error::other("encryption failed"))?;
 
         // Layout: [ciphertext(4096) | nonce(12) | tag(16)]
         let mut block = [0u8; PHYSICAL_PAGE_SIZE];
@@ -113,7 +112,7 @@ impl ActiveCipher {
         &self,
         page_no: u64,
         block: &[u8; PHYSICAL_PAGE_SIZE],
-    ) -> std::io::Result<[u8; LOGICAL_PAGE_SIZE]> {
+    ) -> io::Result<[u8; LOGICAL_PAGE_SIZE]> {
         let ciphertext_part = &block[..LOGICAL_PAGE_SIZE];
         let nonce_bytes = &block[LOGICAL_PAGE_SIZE..LOGICAL_PAGE_SIZE + NONCE_SIZE];
         let tag = &block[LOGICAL_PAGE_SIZE + NONCE_SIZE..];
@@ -141,7 +140,7 @@ impl ActiveCipher {
                 },
             ),
         }
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "decryption failed"))?;
+        .map_err(|_| io::Error::other("decryption failed"))?;
 
         let mut result = [0u8; LOGICAL_PAGE_SIZE];
         result.copy_from_slice(&pt);
@@ -229,6 +228,7 @@ impl Vfs for EncryptedVfs {
                     .read(true)
                     .write(true)
                     .create(true)
+                    .truncate(false)
                     .open(&tmp)
                     .map_err(|_| sqlite_plugin::vars::SQLITE_CANTOPEN)?;
                 (f, Some(tmp))
@@ -243,10 +243,8 @@ impl Vfs for EncryptedVfs {
     }
 
     fn close(&self, handle: Self::Handle) -> VfsResult<()> {
-        if handle.delete_on_close {
-            if let Some(p) = &handle.path {
-                let _ = fs::remove_file(p);
-            }
+        if handle.delete_on_close && let Some(p) = &handle.path {
+            let _ = fs::remove_file(p);
         }
         Ok(())
     }
@@ -684,7 +682,7 @@ fn make_hidden(path: &Path) {
 
     let wide: Vec<u16> = OsStr::new(path)
         .encode_wide()
-        .chain(std::iter::once(0))
+        .chain(iter::once(0))
         .collect();
     unsafe {
         SetFileAttributesW(wide.as_ptr(), FILE_ATTRIBUTE_HIDDEN);

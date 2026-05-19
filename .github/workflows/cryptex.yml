@@ -244,7 +244,7 @@ jobs:
           toolchain: nightly
       - uses: cargo-bins/cargo-binstall@main
       - run: cargo binstall --no-confirm cargo-udeps
-      - run: cargo udeps --no-default-features --features=file,serde
+      - run: cargo udeps --features=file,serde
       - run: cargo udeps --no-default-features --features=encrypted-vfs
   
   outdated:
