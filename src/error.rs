@@ -94,8 +94,8 @@ impl From<LinuxOsError> for KeyRingError {
     }
 }
 
-#[cfg(feature = "file")]
-#[cfg_attr(docsrs, doc(cfg(feature = "file")))]
+#[cfg(any(feature = "file", feature = "encrypted-vfs"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "file", feature = "encrypted-vfs"))))]
 impl From<rusqlite::Error> for KeyRingError {
     fn from(value: rusqlite::Error) -> Self {
         KeyRingError::GeneralError {

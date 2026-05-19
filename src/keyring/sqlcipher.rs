@@ -681,8 +681,7 @@ mod tests {
 
         // Create with A, rekey to B, then rekey to C
         {
-            let mut keyring =
-                SqlCipherKeyring::with_params(&params_a, Some(path.clone())).unwrap();
+            let mut keyring = SqlCipherKeyring::with_params(&params_a, Some(path.clone())).unwrap();
             keyring.set_secret("seq", b"sequential_data").unwrap();
             keyring.rekey(&params_b).unwrap();
             keyring.rekey(&params_c).unwrap();
@@ -690,8 +689,7 @@ mod tests {
 
         // Only C should work
         {
-            let mut keyring =
-                SqlCipherKeyring::with_params(&params_c, Some(path.clone())).unwrap();
+            let mut keyring = SqlCipherKeyring::with_params(&params_c, Some(path.clone())).unwrap();
             assert_eq!(keyring.get_secret("seq").unwrap().0, b"sequential_data");
         }
 

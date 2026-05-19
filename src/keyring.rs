@@ -5,6 +5,8 @@
 
 mod keyringsecret;
 
+#[cfg(feature = "encrypted-vfs")]
+pub mod encrypted_vfs;
 #[cfg(any(feature = "yubihsm-usb", feature = "yubihsm-http"))]
 pub mod kms;
 #[cfg(all(target_os = "linux", feature = "linux-secret-service"))]
@@ -79,6 +81,7 @@ pub fn get_os_keyring(service: &str) -> Result<OsKeyRing<'_>> {
     all(target_os = "windows", feature = "windows-credentials"),
     all(target_os = "linux", feature = "linux-secret-service"),
     feature = "file",
+    feature = "encrypted-vfs",
     feature = "yubihsm-usb",
     feature = "yubihsm-http",
 )))]
