@@ -57,8 +57,10 @@ jobs:
       - run: cargo clippy --no-default-features --features macos-keychain -- -D warnings
       - run: cargo clippy --no-default-features --features file -- -D warnings
       - run: cargo clippy --no-default-features --features "macos-keychain,file" -- -D warnings
-      - name: Set LIBCLANG_PATH for encrypted-vfs
-        run: echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
+      - name: Install LLVM and set LIBCLANG_PATH for encrypted-vfs
+        run: |
+          brew install llvm
+          echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
       - run: cargo clippy --no-default-features --features encrypted-vfs -- -D warnings
 
   clippy-windows:
@@ -128,8 +130,10 @@ jobs:
         with:
           toolchain: stable
       - run: cargo doc --no-default-features --features "macos-keychain,file"
-      - name: Set LIBCLANG_PATH for encrypted-vfs
-        run: echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
+      - name: Install LLVM and set LIBCLANG_PATH for encrypted-vfs
+        run: |
+          brew install llvm
+          echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
       - run: cargo doc --no-default-features --features encrypted-vfs
 
   doc-windows:
@@ -206,9 +210,11 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ matrix.cache-key }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-${{ matrix.cache-key }}-
-      - name: Set LIBCLANG_PATH for encrypted-vfs
+      - name: Install LLVM and set LIBCLANG_PATH for encrypted-vfs
         if: matrix.cache-key == 'encrypted-vfs'
-        run: echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
+        run: |
+          brew install llvm
+          echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
       - name: Build
         run: cargo build --no-default-features --features "${{ matrix.features }}"
       - name: Test

@@ -19,6 +19,9 @@ version = "2.3.0"
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+[package.metadata.cargo-udeps.ignore]
+normal = ["rpassword", "whoami"]
+
 [lib]
 crate-type = ["staticlib", "rlib", "cdylib"]
 
