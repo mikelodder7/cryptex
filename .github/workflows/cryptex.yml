@@ -42,6 +42,8 @@ jobs:
       - run: cargo clippy --features=serde -- -D warnings
       - run: cargo clippy --no-default-features --features=file -- -D warnings
       - run: cargo clippy --no-default-features --features "linux-secret-service,file" -- -D warnings
+      - name: Install libclang for encrypted-vfs
+        run: sudo apt-get install -y libclang-dev
       - run: cargo clippy --no-default-features --features encrypted-vfs -- -D warnings
 
   clippy-macos:
@@ -55,6 +57,8 @@ jobs:
       - run: cargo clippy --no-default-features --features macos-keychain -- -D warnings
       - run: cargo clippy --no-default-features --features file -- -D warnings
       - run: cargo clippy --no-default-features --features "macos-keychain,file" -- -D warnings
+      - name: Set LIBCLANG_PATH for encrypted-vfs
+        run: echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
       - run: cargo clippy --no-default-features --features encrypted-vfs -- -D warnings
 
   clippy-windows:
@@ -112,6 +116,8 @@ jobs:
         with:
           toolchain: stable
       - run: cargo doc --no-default-features --features "linux-secret-service,file"
+      - name: Install libclang for encrypted-vfs
+        run: sudo apt-get install -y libclang-dev
       - run: cargo doc --no-default-features --features encrypted-vfs
 
   doc-macos:
@@ -122,6 +128,8 @@ jobs:
         with:
           toolchain: stable
       - run: cargo doc --no-default-features --features "macos-keychain,file"
+      - name: Set LIBCLANG_PATH for encrypted-vfs
+        run: echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
       - run: cargo doc --no-default-features --features encrypted-vfs
 
   doc-windows:
@@ -164,6 +172,9 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ matrix.cache-key }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-${{ matrix.cache-key }}-
+      - name: Install libclang for encrypted-vfs
+        if: matrix.cache-key == 'encrypted-vfs'
+        run: sudo apt-get install -y libclang-dev
       - name: Build
         run: cargo build --no-default-features --features "${{ matrix.features }}"
       - name: Test
@@ -195,6 +206,9 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ matrix.cache-key }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-${{ matrix.cache-key }}-
+      - name: Set LIBCLANG_PATH for encrypted-vfs
+        if: matrix.cache-key == 'encrypted-vfs'
+        run: echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
       - name: Build
         run: cargo build --no-default-features --features "${{ matrix.features }}"
       - name: Test
@@ -245,8 +259,10 @@ jobs:
       - uses: cargo-bins/cargo-binstall@main
       - run: cargo binstall --no-confirm cargo-udeps
       - run: cargo udeps --features=file,serde
+      - name: Install libclang for encrypted-vfs
+        run: sudo apt-get install -y libclang-dev
       - run: cargo udeps --no-default-features --features=encrypted-vfs
-  
+
   outdated:
     runs-on: ubuntu-latest
     steps:
