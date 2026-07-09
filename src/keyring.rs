@@ -203,6 +203,18 @@ pub trait ListKeyRing {
     fn list_secrets() -> Result<Vec<BTreeMap<String, String>>>;
 }
 
+#[cfg(all(test, any(feature = "file", feature = "encrypted-vfs")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_defaults_use_argon2_defaults() {
+        assert_eq!(default_memory_cost(), argon2::Params::DEFAULT_M_COST);
+        assert_eq!(default_threads(), argon2::Params::DEFAULT_T_COST);
+        assert_eq!(default_parallel(), argon2::Params::DEFAULT_P_COST);
+    }
+}
+
 #[cfg(any(
     all(target_os = "macos", feature = "macos-keychain"),
     all(target_os = "linux", feature = "linux-secret-service"),

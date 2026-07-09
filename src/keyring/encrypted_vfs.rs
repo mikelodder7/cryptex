@@ -77,21 +77,20 @@ impl ActiveCipher {
         let mut nonce_bytes = [0u8; NONCE_SIZE];
         getrandom::fill(&mut nonce_bytes).map_err(|e| io::Error::other(e.to_string()))?;
 
-        // chacha20poly1305::Nonce == GenericArray<u8, U12>, same type expected by
-        // Aes256Gcm — both ciphers resolve to the same aead 0.5 generic_array dep.
-        let nonce = chacha20poly1305::Nonce::from_slice(&nonce_bytes);
+        let nonce = chacha20poly1305::Nonce::try_from(&nonce_bytes[..])
+            .map_err(|_| io::Error::other("invalid nonce length"))?;
         let aad = page_no.to_le_bytes();
 
         let ct = match self {
             Self::ChaCha(c) => c.encrypt(
-                nonce,
+                &nonce,
                 Payload {
                     msg: plaintext.as_slice(),
                     aad: &aad,
                 },
             ),
             Self::Aes(c) => c.encrypt(
-                nonce,
+                &nonce,
                 Payload {
                     msg: plaintext.as_slice(),
                     aad: &aad,
@@ -121,19 +120,20 @@ impl ActiveCipher {
         ct_with_tag.extend_from_slice(ciphertext_part);
         ct_with_tag.extend_from_slice(tag);
 
-        let nonce = chacha20poly1305::Nonce::from_slice(nonce_bytes);
+        let nonce = chacha20poly1305::Nonce::try_from(nonce_bytes)
+            .map_err(|_| io::Error::other("invalid nonce length"))?;
         let aad = page_no.to_le_bytes();
 
         let pt = match self {
             Self::ChaCha(c) => c.decrypt(
-                nonce,
+                &nonce,
                 Payload {
                     msg: &ct_with_tag,
                     aad: &aad,
                 },
             ),
             Self::Aes(c) => c.decrypt(
-                nonce,
+                &nonce,
                 Payload {
                     msg: &ct_with_tag,
                     aad: &aad,

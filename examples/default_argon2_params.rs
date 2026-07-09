@@ -9,6 +9,9 @@ fn main() -> Result<(), String> {
     let expected_default_memory_cost = cryptex::default_memory_cost();
     let expected_default_threads = cryptex::default_threads();
     let expected_default_parallel = cryptex::default_parallel();
+    let hash_memory = argon2_param("CRYPTEX_ARGON2_MEMORY", expected_default_memory_cost)?;
+    let hash_threads = argon2_param("CRYPTEX_ARGON2_THREADS", expected_default_threads)?;
+    let hash_parallel = argon2_param("CRYPTEX_ARGON2_PARALLEL", expected_default_parallel)?;
 
     #[cfg(feature = "file")]
     {
@@ -25,9 +28,9 @@ fn main() -> Result<(), String> {
         assert_eq!(parsed.parallel, expected_default_parallel);
         hash_password(
             "sqlcipher",
-            parsed.memory,
-            parsed.threads,
-            parsed.parallel,
+            hash_memory,
+            hash_threads,
+            hash_parallel,
             &parsed.password,
             &parsed.salt,
         )?;
@@ -48,15 +51,26 @@ fn main() -> Result<(), String> {
         assert_eq!(parsed.parallel, expected_default_parallel);
         hash_password(
             "encrypted-vfs",
-            parsed.memory,
-            parsed.threads,
-            parsed.parallel,
+            hash_memory,
+            hash_threads,
+            hash_parallel,
             &parsed.password,
             &parsed.salt,
         )?;
     }
 
     Ok(())
+}
+
+#[cfg(any(feature = "file", feature = "encrypted-vfs"))]
+fn argon2_param(name: &str, default: u32) -> Result<u32, String> {
+    match std::env::var(name) {
+        Ok(value) => value
+            .parse()
+            .map_err(|e| format!("invalid {name}={value}: {e}")),
+        Err(std::env::VarError::NotPresent) => Ok(default),
+        Err(e) => Err(format!("invalid {name}: {e}")),
+    }
 }
 
 #[cfg(any(feature = "file", feature = "encrypted-vfs"))]

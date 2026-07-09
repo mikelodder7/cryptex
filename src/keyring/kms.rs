@@ -298,10 +298,13 @@ impl<B: KmsBackend> KmsKeyRing<B> {
             })?;
 
         let aad = Self::build_aad(&entry);
-        let gcm_nonce = aes_gcm::Nonce::from_slice(&entry.nonce);
+        let gcm_nonce =
+            aes_gcm::Nonce::try_from(&entry.nonce[..]).map_err(|_| KeyRingError::GeneralError {
+                msg: "invalid nonce length for AES-256-GCM".to_string(),
+            })?;
         let ciphertext = cipher
             .encrypt(
-                gcm_nonce,
+                &gcm_nonce,
                 Payload {
                     msg: plaintext,
                     aad: &aad,
@@ -325,10 +328,13 @@ impl<B: KmsBackend> KmsKeyRing<B> {
             })?;
 
         let aad = Self::build_aad(entry);
-        let gcm_nonce = aes_gcm::Nonce::from_slice(&entry.nonce);
+        let gcm_nonce =
+            aes_gcm::Nonce::try_from(&entry.nonce[..]).map_err(|_| KeyRingError::GeneralError {
+                msg: "invalid nonce length for AES-256-GCM".to_string(),
+            })?;
         cipher
             .decrypt(
-                gcm_nonce,
+                &gcm_nonce,
                 Payload {
                     msg: &entry.ciphertext,
                     aad: &aad,

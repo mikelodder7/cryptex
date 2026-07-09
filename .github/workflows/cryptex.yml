@@ -42,9 +42,10 @@ jobs:
       - run: cargo clippy --features=serde -- -D warnings
       - run: cargo clippy --no-default-features --features=file -- -D warnings
       - run: cargo clippy --no-default-features --features "linux-secret-service,file" -- -D warnings
-      - name: Install libclang for encrypted-vfs
-        run: sudo apt-get install -y libclang-dev
+      - name: Install native dependencies for encrypted-vfs and YubiHSM
+        run: sudo apt-get install -y libclang-dev libusb-1.0-0-dev
       - run: cargo clippy --no-default-features --features encrypted-vfs -- -D warnings
+      - run: cargo clippy --all-targets --all-features -- -D warnings
 
   clippy-macos:
     runs-on: macos-latest
@@ -118,9 +119,10 @@ jobs:
         with:
           toolchain: stable
       - run: cargo doc --no-default-features --features "linux-secret-service,file"
-      - name: Install libclang for encrypted-vfs
-        run: sudo apt-get install -y libclang-dev
+      - name: Install native dependencies for encrypted-vfs and YubiHSM
+        run: sudo apt-get install -y libclang-dev libusb-1.0-0-dev
       - run: cargo doc --no-default-features --features encrypted-vfs
+      - run: cargo doc --no-deps --all-features
 
   doc-macos:
     runs-on: macos-latest
@@ -176,13 +178,19 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ matrix.cache-key }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-${{ matrix.cache-key }}-
-      - name: Install libclang for encrypted-vfs
+      - name: Install native dependencies for encrypted-vfs and YubiHSM
         if: matrix.cache-key == 'encrypted-vfs'
-        run: sudo apt-get install -y libclang-dev
+        run: sudo apt-get install -y libclang-dev libusb-1.0-0-dev
       - name: Build
         run: cargo build --no-default-features --features "${{ matrix.features }}"
       - name: Test
         run: cargo test --no-default-features --features "${{ matrix.features }}"
+      - name: Test Argon2 defaults example
+        if: matrix.cache-key == 'encrypted-vfs'
+        run: cargo test --test default_argon2_params --no-default-features --features "file,encrypted-vfs"
+      - name: Test all features
+        if: matrix.cache-key == 'encrypted-vfs'
+        run: cargo test --all-features
 
   macos:
     runs-on: macos-latest

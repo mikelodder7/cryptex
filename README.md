@@ -55,7 +55,8 @@ password=<password> salt=<salt value>
 ```
 
 The password and salt are hashed using Argon2id. The memory cost is measured in KiB blocks, not
-bytes. The current non-test defaults are:
+bytes. These defaults are part of the current release configuration and may be tuned in future
+minor releases:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -74,6 +75,14 @@ For the encrypted VFS backend, the cipher can also be selected:
 ```text
 password=<password> salt=<salt value> cipher=chacha20poly1305
 password=<password> salt=<salt value> cipher=aes256gcm
+```
+
+The `default_argon2_params` example derives a key and prints elapsed time for the current defaults.
+It can also be used to try alternate values without changing code:
+
+```bash
+cargo run --quiet --example default_argon2_params --no-default-features --features file,encrypted-vfs
+CRYPTEX_ARGON2_MEMORY=32768 CRYPTEX_ARGON2_THREADS=3 CRYPTEX_ARGON2_PARALLEL=2 cargo run --quiet --example default_argon2_params --no-default-features --features file,encrypted-vfs
 ```
 
 The program can be compiled from any OS to run on any OS. Cryptex-CLI is the command line tool while Cryptex is the library.
