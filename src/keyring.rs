@@ -119,6 +119,42 @@ pub const fn allows_file() -> bool {
     false
 }
 
+/// Default Argon2 memory cost, in KiB blocks, for file-backed keyrings.
+#[cfg(all(not(test), any(feature = "file", feature = "encrypted-vfs")))]
+pub const fn default_memory_cost() -> u32 {
+    32 * 1024
+}
+
+/// Default Argon2 memory cost, in KiB blocks, for file-backed keyring tests.
+#[cfg(all(test, any(feature = "file", feature = "encrypted-vfs")))]
+pub const fn default_memory_cost() -> u32 {
+    argon2::Params::DEFAULT_M_COST
+}
+
+/// Default Argon2 thread/time cost for file-backed keyrings.
+#[cfg(all(not(test), any(feature = "file", feature = "encrypted-vfs")))]
+pub const fn default_threads() -> u32 {
+    3
+}
+
+/// Default Argon2 thread/time cost for file-backed keyring tests.
+#[cfg(all(test, any(feature = "file", feature = "encrypted-vfs")))]
+pub const fn default_threads() -> u32 {
+    argon2::Params::DEFAULT_T_COST
+}
+
+/// Default Argon2 parallelism cost for file-backed keyrings.
+#[cfg(all(not(test), any(feature = "file", feature = "encrypted-vfs")))]
+pub const fn default_parallel() -> u32 {
+    2
+}
+
+/// Default Argon2 parallelism cost for file-backed keyring tests.
+#[cfg(all(test, any(feature = "file", feature = "encrypted-vfs")))]
+pub const fn default_parallel() -> u32 {
+    argon2::Params::DEFAULT_P_COST
+}
+
 /// A trait for all key rings
 pub trait KeyRing: Send + Sync {
     fn get_secret<S: AsRef<str>>(&mut self, id: S) -> Result<KeyRingSecret>;

@@ -706,6 +706,7 @@ pub struct ConnectionParams {
     pub key: Vec<u8>,
     pub password: Vec<u8>,
     pub salt: Vec<u8>,
+    /// The Argon2 memory cost in KiB blocks.
     pub memory: u32,
     pub threads: u32,
     pub parallel: u32,
@@ -715,14 +716,16 @@ pub struct ConnectionParams {
 
 impl Default for ConnectionParams {
     fn default() -> Self {
-        let m_cost = get_default_memory_cost();
+        let m_cost = default_memory_cost();
+        let threads = default_threads();
+        let parallel = default_parallel();
         Self {
             key: vec![],
             password: vec![],
             salt: vec![],
             memory: m_cost,
-            threads: Argon2Params::DEFAULT_T_COST,
-            parallel: Argon2Params::DEFAULT_P_COST,
+            threads,
+            parallel,
             cipher: CipherAlgorithm::default(),
         }
     }
@@ -823,16 +826,6 @@ impl ConnectionParams {
         };
         Ok(())
     }
-}
-
-#[cfg(test)]
-fn get_default_memory_cost() -> u32 {
-    Argon2Params::DEFAULT_M_COST
-}
-
-#[cfg(not(test))]
-fn get_default_memory_cost() -> u32 {
-    19_917_824
 }
 
 // ─── Parser ───────────────────────────────────────────────────────────────────

@@ -185,12 +185,12 @@ fn make_hidden(_path: &Path) {}
 /// let params = "password=1qaz2wsx3edc4rfv salt=0okm9ijn8uhb7ygv".parse::<ConnectionParams>().unwrap();
 /// ```
 ///
-/// or with extra parameters
+/// or with extra parameters. `memory` is Argon2's memory cost in KiB blocks.
 ///
 /// ```
 /// use cryptex::sqlcipher::ConnectionParams;
 ///
-/// let params = "password=1qaz2wsx3edc4rfv salt=0okm9ijn8uhb7ygv memory=19917824 threads=2 parallel=1".parse::<ConnectionParams>().unwrap();
+/// let params = "password=1qaz2wsx3edc4rfv salt=0okm9ijn8uhb7ygv memory=49152 threads=2 parallel=1".parse::<ConnectionParams>().unwrap();
 /// ```
 #[derive(Zeroize)]
 pub struct ConnectionParams {
@@ -201,7 +201,7 @@ pub struct ConnectionParams {
     pub password: Vec<u8>,
     /// The salt to use when hashing the password
     pub salt: Vec<u8>,
-    /// The memory requirement
+    /// The Argon2 memory cost in KiB blocks
     pub memory: u32,
     /// The number of iterations or threads requirement
     pub threads: u32,
@@ -211,14 +211,16 @@ pub struct ConnectionParams {
 
 impl Default for ConnectionParams {
     fn default() -> Self {
-        let m_cost = get_default_memory_cost();
+        let m_cost = default_memory_cost();
+        let threads = default_threads();
+        let parallel = default_parallel();
         Self {
             key: vec![],
             password: vec![],
             salt: vec![],
             memory: m_cost,
-            threads: Argon2Params::DEFAULT_T_COST,
-            parallel: Argon2Params::DEFAULT_P_COST,
+            threads,
+            parallel,
         }
     }
 }
@@ -340,16 +342,6 @@ impl ConnectionParams {
         self.parallel = cost;
         self
     }
-}
-
-#[cfg(test)]
-fn get_default_memory_cost() -> u32 {
-    Argon2Params::DEFAULT_M_COST
-}
-
-#[cfg(not(test))]
-fn get_default_memory_cost() -> u32 {
-    19_917_824 // 19456 KiB converted to bytes
 }
 
 struct Parser<'a> {

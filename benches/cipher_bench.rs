@@ -1,7 +1,7 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use cryptex::KeyRing;
 use cryptex::encrypted_vfs::{ConnectionParams, EncryptedVfsKeyring};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{env, fs};
 
@@ -17,19 +17,19 @@ fn bench_dir(label: &str) -> PathBuf {
     p
 }
 
-fn open(params: &ConnectionParams, path: &PathBuf) -> EncryptedVfsKeyring {
-    EncryptedVfsKeyring::with_params(params, Some(path.clone())).unwrap()
+fn open(params: &ConnectionParams, path: &Path) -> EncryptedVfsKeyring {
+    EncryptedVfsKeyring::with_params(params, Some(path.to_path_buf())).unwrap()
 }
 
 fn write_n(kr: &mut EncryptedVfsKeyring, n: usize) {
     for i in 0..n {
-        kr.set_secret(&format!("k{i:04}"), VALUE).unwrap();
+        kr.set_secret(format!("k{i:04}"), VALUE).unwrap();
     }
 }
 
 fn read_n(kr: &mut EncryptedVfsKeyring, n: usize) {
     for i in 0..n {
-        kr.get_secret(&format!("k{i:04}")).unwrap();
+        kr.get_secret(format!("k{i:04}")).unwrap();
     }
 }
 

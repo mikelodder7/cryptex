@@ -26,7 +26,7 @@
 //!
 //! Before first use, generate the HMAC key on the device:
 //!
-//! ```no_run
+//! ```text
 //! cryptex::yubihsm::YubiHsmKeyRing::setup(
 //!     "connector=usb auth_key_id=1 password=password domain=1",
 //!     2,   // object ID for the new HMAC key

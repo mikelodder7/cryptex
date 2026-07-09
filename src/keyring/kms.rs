@@ -514,8 +514,8 @@ mod tests {
         fn hmac_sha256(&self, msg: Vec<u8>) -> Result<[u8; 32]> {
             use sha2::{Digest, Sha256};
             let mut hasher = Sha256::new();
-            hasher.update(&self.key);
-            hasher.update(&msg);
+            hasher.update(self.key);
+            hasher.update(msg);
             let result = hasher.finalize();
             let mut out = [0u8; 32];
             out.copy_from_slice(&result);

@@ -41,13 +41,40 @@ Currently Mac OS X offers support for a [CLI tool](https://www.netmeister.org/bl
 
 *Cryptex* is written in Rust and has no external dependencies to do its job except DBus on Linux.
 
-*Cryptex* also allows for using [SQLCipher](https://www.zetetic.net/sqlcipher/) instead of keyring via the `feature=file`.
-You can check if SQLCipher is enabled by running the function `allows_file()`.
-This approach uses two inputs to create the encryption key: a user selected password, and random system generated data.
-Similar to how databases use connection strings, this library employs a connection string to indicate the values as well.
-The connection string syntax is `password=<password> salt=<hex encoded salt value>`. This value is hashed using Argon2id
-and thus the memory, threads, and degree of parallelism can also be set as part of the string
-`memory=<integer> threads=<integer> parallel=<integer>`.
+*Cryptex* also supports file-backed keyrings instead of the OS keyring. The `file` feature enables
+the [SQLCipher](https://www.zetetic.net/sqlcipher/) backend, and the `encrypted-vfs` feature enables
+a bundled SQLite VFS encrypted with ChaCha20-Poly1305 by default or AES-256-GCM when requested.
+You can check if SQLCipher is enabled by running `allows_file()`.
+
+The file-backed keyrings use two inputs to create the encryption key: a user-selected password and
+random system-generated salt. Similar to how databases use connection strings, this library employs
+a connection string to indicate the values. The basic syntax is:
+
+```text
+password=<password> salt=<salt value>
+```
+
+The password and salt are hashed using Argon2id. The memory cost is measured in KiB blocks, not
+bytes. The current non-test defaults are:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `memory` | `32768` | Argon2 memory cost in KiB blocks |
+| `threads` | `3` | Argon2 time/thread cost |
+| `parallel` | `2` | Argon2 parallelism cost |
+
+The values can be overridden in the connection string:
+
+```text
+password=<password> salt=<salt value> memory=<integer> threads=<integer> parallel=<integer>
+```
+
+For the encrypted VFS backend, the cipher can also be selected:
+
+```text
+password=<password> salt=<salt value> cipher=chacha20poly1305
+password=<password> salt=<salt value> cipher=aes256gcm
+```
 
 The program can be compiled from any OS to run on any OS. Cryptex-CLI is the command line tool while Cryptex is the library.
 
@@ -147,7 +174,7 @@ cryptex = { version = "...", features = ["yubihsm-http"] }
 Before first use, generate the HMAC key on the device (run once per device):
 
 ```rust
-use cryptex::keyring::yubihsm::YubiHsmKeyRing;
+use cryptex::yubihsm::YubiHsmKeyRing;
 
 YubiHsmKeyRing::setup(
     "connector=usb auth_key_id=1 password=password domain=1",
@@ -179,8 +206,8 @@ connector=http addr=127.0.0.1 port=12345 hmac_key_id=2 auth_key_id=1 password=pa
 #### Usage
 
 ```rust
-use cryptex::keyring::{KeyRing, NewKeyRing};
-use cryptex::keyring::yubihsm::YubiHsmKeyRing;
+use cryptex::{KeyRing, NewKeyRing};
+use cryptex::yubihsm::YubiHsmKeyRing;
 
 let mut ring = YubiHsmKeyRing::new(
     "connector=usb hmac_key_id=2 auth_key_id=1 password=password domain=1 service=myapp"
@@ -290,7 +317,7 @@ to retrieve targeted secrets. However, this is better than the secrets existing 
 *Cryptex* takes at least two arguments: service_name and ID.
 When storing a secret, an additional parameter is needed. If omitted (the preferred method) the value is read from STDIN.
 
-In the case of using SQLCipher, the service_name is the connection string to be used.
+In the case of using a file-backed keyring, the service_name is the connection string to be used.
 
 ### Storing a secret
 ```bash
