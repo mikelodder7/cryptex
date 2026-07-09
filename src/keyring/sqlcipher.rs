@@ -551,6 +551,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "SQLCipher rekey overflows the Windows test stack in CI"
+    )]
     fn rekey_works() {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".test_rekey");
         let _ = fs::remove_dir_all(&path);
@@ -588,6 +592,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "SQLCipher rekey overflows the Windows test stack in CI"
+    )]
     fn rekey_preserves_multiple_secrets() {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".test_rekey_multi");
         let _ = fs::remove_dir_all(&path);
@@ -620,6 +628,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "SQLCipher rekey overflows the Windows test stack in CI"
+    )]
     fn rekey_allows_continued_use_on_same_connection() {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".test_rekey_continue");
         let _ = fs::remove_dir_all(&path);
@@ -657,6 +669,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "SQLCipher rekey overflows the Windows test stack in CI"
+    )]
     fn rekey_sequential() {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".test_rekey_seq");
         let _ = fs::remove_dir_all(&path);
@@ -693,6 +709,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "SQLCipher rekey overflows the Windows test stack in CI"
+    )]
     fn rekey_with_raw_key() {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".test_rekey_rawkey");
         let _ = fs::remove_dir_all(&path);
