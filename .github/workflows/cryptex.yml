@@ -262,6 +262,8 @@ jobs:
       - name: Build
         run: cargo build --no-default-features --features "${{ matrix.features }}"
       - name: Test
+        env:
+          RUSTFLAGS: "-D warnings -C link-arg=/STACK:16777216"
         run: cargo test --no-default-features --features "${{ matrix.features }}"
 
   deps:
