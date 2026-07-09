@@ -1,3 +1,5 @@
+#![cfg(all(feature = "file", feature = "encrypted-vfs"))]
+
 use std::process::Command;
 
 #[test]
