@@ -548,6 +548,10 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "SQLCipher overflows the Windows test stack in CI"
+    )]
     fn works() {
         {
             let file = get_keyring_file(None).unwrap();
