@@ -22,10 +22,7 @@ unsafe impl Sync for SqlCipherKeyring {}
 
 impl DynKeyRing for SqlCipherKeyring {
     fn get_secret(&mut self, id: &str) -> Result<KeyRingSecret> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT value FROM secrets WHERE id=?")
-            .unwrap();
+        let mut stmt = self.conn.prepare("SELECT value FROM secrets WHERE id=?")?;
         let val = stmt.query_row(params![id], |row| {
             let s: String = row.get(0)?;
             hex::decode(s).map_err(|_e| rusqlite::Error::InvalidQuery)
@@ -35,21 +32,15 @@ impl DynKeyRing for SqlCipherKeyring {
 
     fn set_secret(&mut self, id: &str, secret: &[u8]) -> Result<()> {
         let secret = hex::encode(secret);
-        let mut stmt = self
-            .conn
-            .prepare(
-                "INSERT INTO secrets(id, value) VALUES(?, ?) ON CONFLICT(id) DO UPDATE SET value=?",
-            )
-            .expect("SQL statement to work");
+        let mut stmt = self.conn.prepare(
+            "INSERT INTO secrets(id, value) VALUES(?, ?) ON CONFLICT(id) DO UPDATE SET value=?",
+        )?;
         stmt.execute(params![id, secret.clone(), secret])?;
         Ok(())
     }
 
     fn delete_secret(&mut self, id: &str) -> Result<()> {
-        let mut stmt = self
-            .conn
-            .prepare("DELETE FROM secrets WHERE id=?")
-            .expect("SQL statement to work");
+        let mut stmt = self.conn.prepare("DELETE FROM secrets WHERE id=?")?;
         stmt.execute(params![id])?;
         Ok(())
     }
@@ -69,7 +60,7 @@ impl SqlCipherKeyring {
     /// After a successful rekey the current connection uses the new key;
     /// any future opens must use `new_params`.
     pub fn rekey(&self, new_params: &ConnectionParams) -> Result<()> {
-        let new_key = derive_key(new_params);
+        let new_key = derive_key(new_params)?;
         let mut hex_key = hex::encode(&*new_key);
         let result = self
             .conn
@@ -83,22 +74,27 @@ impl SqlCipherKeyring {
 
     /// Create a new keyring with the connection params
     pub fn with_params(connection: &ConnectionParams, path: Option<PathBuf>) -> Result<Self> {
-        let key = derive_key(connection);
-        let conn = Connection::open(get_keyring_file(path)).expect("Unable to open keyring file");
+        let key = derive_key(connection)?;
+        let db_path = get_keyring_file(path)?;
+        let conn = Connection::open(&db_path)?;
+        secure_file(&db_path)?;
         let mut hex_key = hex::encode(&*key);
         conn.pragma_update(None, "key", &hex_key)
-            .expect("Unable to set keyring key");
+            .map_err(|e| KeyRingError::GeneralError {
+                msg: format!("unable to set keyring key: {}", e),
+            })?;
         hex_key.zeroize();
         conn.pragma_update(None, "cipher_memory_security", "ON")
-            .expect("Cannot set memory sanitization");
+            .map_err(|e| KeyRingError::GeneralError {
+                msg: format!("cannot set memory sanitization: {}", e),
+            })?;
         conn.query_row("SELECT COUNT(*) FROM `sqlite_master`;", params![], |_row| {
             Ok(())
         })?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS secrets (id TEXT UNIQUE NOT NULL, value TEXT NOT NULL)",
             (),
-        )
-        .expect("Unable to create keyring table");
+        )?;
         Ok(Self { conn })
     }
 }
@@ -107,7 +103,7 @@ impl SqlCipherKeyring {
 ///
 /// If `params.key` is set, returns it directly; otherwise derives a 32-byte
 /// key from the password + salt via Argon2id.
-fn derive_key(params: &ConnectionParams) -> Zeroizing<Vec<u8>> {
+fn derive_key(params: &ConnectionParams) -> Result<Zeroizing<Vec<u8>>> {
     if params.key.is_empty() {
         let argon2_params = Argon2Params::new(
             params.memory,
@@ -115,21 +111,25 @@ fn derive_key(params: &ConnectionParams) -> Zeroizing<Vec<u8>> {
             params.parallel,
             Some(Argon2Params::DEFAULT_OUTPUT_LEN),
         )
-        .unwrap();
+        .map_err(|e| KeyRingError::GeneralError {
+            msg: format!("invalid Argon2 parameters: {}", e),
+        })?;
         let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, argon2_params);
         let mut okm = [0u8; 32];
         argon2
             .hash_password_into(&params.password, &params.salt, &mut okm)
-            .unwrap();
+            .map_err(|e| KeyRingError::GeneralError {
+                msg: format!("Argon2 key derivation failed: {}", e),
+            })?;
         let result = Zeroizing::new(okm.to_vec());
         okm.zeroize();
-        result
+        Ok(result)
     } else {
-        Zeroizing::new(params.key.to_vec())
+        Ok(Zeroizing::new(params.key.to_vec()))
     }
 }
 
-fn get_keyring_file(in_path: Option<PathBuf>) -> PathBuf {
+fn get_keyring_file(in_path: Option<PathBuf>) -> Result<PathBuf> {
     let mut path = match in_path {
         None => {
             let mut path = dirs::home_dir().unwrap_or_else(|| {
@@ -145,12 +145,48 @@ fn get_keyring_file(in_path: Option<PathBuf>) -> PathBuf {
     };
 
     if !path.is_dir() {
-        fs::create_dir_all(&path)
-            .unwrap_or_else(|_| panic!("Unable to create folder: {}", path.to_str().unwrap()));
+        fs::create_dir_all(&path).map_err(|e| KeyRingError::GeneralError {
+            msg: format!("unable to create folder {}: {}", path.display(), e),
+        })?;
     }
+    secure_dir(&path)?;
     make_hidden(&path);
     path.push("keyring.db3");
-    path
+    Ok(path)
+}
+
+#[cfg(unix)]
+fn secure_dir(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|e| {
+        KeyRingError::GeneralError {
+            msg: format!("unable to secure folder {}: {}", path.display(), e),
+        }
+    })
+}
+
+#[cfg(not(unix))]
+fn secure_dir(_path: &Path) -> Result<()> {
+    Ok(())
+}
+
+/// Restrict the database file itself to owner-only access (defense in depth
+/// beyond the `0o700` parent directory).
+#[cfg(unix)]
+fn secure_file(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|e| {
+        KeyRingError::GeneralError {
+            msg: format!("unable to secure keyring file {}: {}", path.display(), e),
+        }
+    })
+}
+
+#[cfg(not(unix))]
+fn secure_file(_path: &Path) -> Result<()> {
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]
@@ -244,7 +280,11 @@ impl FromStr for ConnectionParams {
 impl ConnectionParams {
     fn param(&mut self, key: &str, value: &str) -> Result<()> {
         match key {
-            "key" => self.key = hex::decode(value).unwrap(),
+            "key" => {
+                self.key = hex::decode(value).map_err(|e| KeyRingError::GeneralError {
+                    msg: format!("invalid hex key: {}", e),
+                })?
+            }
             "password" => self.password = value.as_bytes().to_vec(),
             "salt" => self.salt = value.as_bytes().to_vec(),
             "memory" => {
@@ -510,7 +550,7 @@ mod tests {
     #[test]
     fn works() {
         {
-            let file = get_keyring_file(None);
+            let file = get_keyring_file(None).unwrap();
             let _ = fs::remove_dir_all(file);
         }
         {
@@ -545,9 +585,15 @@ mod tests {
             assert!(res_keyring.is_err());
         }
         {
-            let file = get_keyring_file(None);
+            let file = get_keyring_file(None).unwrap();
             let _ = fs::remove_dir_all(file);
         }
+    }
+
+    #[test]
+    fn invalid_hex_key_is_an_error() {
+        let result = "key=not-hex".parse::<ConnectionParams>();
+        assert!(result.is_err());
     }
 
     #[test]

@@ -91,8 +91,18 @@ pub struct Entry {
 
 impl Entry {
     /// Serialize to bytes.
-    pub fn to_bytes(&self) -> Vec<u8> {
+    pub fn to_bytes(&self) -> Result<Vec<u8>> {
         let key_id_bytes = self.key_id.as_bytes();
+        if key_id_bytes.len() > u16::MAX as usize {
+            return Err(KeyRingError::GeneralError {
+                msg: "KMS key ID is too long".to_string(),
+            });
+        }
+        if self.ciphertext.len() > u32::MAX as usize {
+            return Err(KeyRingError::GeneralError {
+                msg: "KMS ciphertext is too long".to_string(),
+            });
+        }
         let key_id_len = key_id_bytes.len() as u16;
         let ct_len = self.ciphertext.len() as u32;
         let mut buf =
@@ -104,7 +114,7 @@ impl Entry {
         buf.extend_from_slice(&self.nonce);
         buf.extend_from_slice(&ct_len.to_le_bytes());
         buf.extend_from_slice(&self.ciphertext);
-        buf
+        Ok(buf)
     }
 
     /// Deserialize from bytes produced by [`Entry::to_bytes`].
@@ -133,7 +143,7 @@ impl Entry {
             b[ct_len_off + 3],
         ]) as usize;
         let ct_start = ct_len_off + 4;
-        if b.len() < ct_start + ct_len {
+        if b.len() != ct_start + ct_len {
             return Err(corrupt());
         }
         let ciphertext = b[ct_start..ct_start + ct_len].to_vec();
@@ -386,15 +396,20 @@ pub(crate) fn entry_filename(id: &str) -> String {
 /// Write `[u16_LE id_len][id][entry_bytes]` atomically via a temp file.
 pub(crate) fn write_entry_file(path: &Path, id: &str, entry: &Entry) -> Result<()> {
     let id_bytes = id.as_bytes();
+    if id_bytes.len() > u16::MAX as usize {
+        return Err(KeyRingError::GeneralError {
+            msg: "secret ID is too long".to_string(),
+        });
+    }
     let id_len = id_bytes.len() as u16;
 
     let mut data = Vec::new();
     data.extend_from_slice(&id_len.to_le_bytes());
     data.extend_from_slice(id_bytes);
-    data.extend_from_slice(&entry.to_bytes());
+    data.extend_from_slice(&entry.to_bytes()?);
 
     let tmp = path.with_extension("tmp");
-    fs::write(&tmp, &data).map_err(io_err)?;
+    write_private_file(&tmp, &data)?;
     fs::rename(&tmp, path).map_err(io_err)
 }
 
@@ -424,7 +439,41 @@ pub(crate) fn entry_dir(backend_name: &str, service: &str) -> Result<PathBuf> {
         .join(backend_name)
         .join(sanitize_name(service));
     fs::create_dir_all(&dir).map_err(io_err)?;
+    secure_dir(&dir)?;
     Ok(dir)
+}
+
+#[cfg(unix)]
+fn secure_dir(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(io_err)
+}
+
+#[cfg(not(unix))]
+fn secure_dir(_path: &Path) -> Result<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn write_private_file(path: &Path, data: &[u8]) -> Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let _ = fs::remove_file(path);
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(io_err)?;
+    file.write_all(data).map_err(io_err)?;
+    file.sync_all().map_err(io_err)
+}
+
+#[cfg(not(unix))]
+fn write_private_file(path: &Path, data: &[u8]) -> Result<()> {
+    fs::write(path, data).map_err(io_err)
 }
 
 /// Replace filesystem-unsafe characters with `_`.
@@ -465,7 +514,7 @@ mod tests {
             nonce: [0xCDu8; 12],
             ciphertext: vec![1, 2, 3, 4, 5],
         };
-        let bytes = entry.to_bytes();
+        let bytes = entry.to_bytes().expect("encode entry");
         let decoded = Entry::from_bytes(&bytes).expect("decode entry");
         assert_eq!(decoded.version, entry.version);
         assert_eq!(decoded.key_id, entry.key_id);
@@ -480,6 +529,34 @@ mod tests {
         assert!(Entry::from_bytes(&[0u8; 2]).is_err());
         // version + key_id_len=0 but missing device_id/nonce/ct_len
         assert!(Entry::from_bytes(&[1u8, 0u8, 0u8, 0u8]).is_err());
+    }
+
+    #[test]
+    fn test_entry_rejects_trailing_data() {
+        let entry = Entry {
+            version: 1,
+            key_id: "key".to_string(),
+            device_id: [0xEFu8; 16],
+            nonce: [0xCDu8; 12],
+            ciphertext: vec![1, 2, 3, 4, 5],
+        };
+        let mut bytes = entry.to_bytes().expect("encode entry");
+        bytes.push(0);
+
+        assert!(Entry::from_bytes(&bytes).is_err());
+    }
+
+    #[test]
+    fn test_entry_rejects_oversized_key_id() {
+        let entry = Entry {
+            version: 1,
+            key_id: "a".repeat(u16::MAX as usize + 1),
+            device_id: [0xEFu8; 16],
+            nonce: [0xCDu8; 12],
+            ciphertext: vec![1, 2, 3, 4, 5],
+        };
+
+        assert!(entry.to_bytes().is_err());
     }
 
     // ── Mock backend for unit testing ────────────────────────────────────────

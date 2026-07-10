@@ -13,7 +13,7 @@ use rusqlite::{Connection, OpenFlags, params};
 use sqlite_plugin::flags::{AccessFlags, LockLevel, OpenOpts};
 use sqlite_plugin::vfs::{RegisterOpts, Vfs, VfsHandle, VfsResult, register_static};
 use std::ffi::CString;
-use std::fs::{File, OpenOptions};
+use std::fs::{File, OpenOptions, TryLockError};
 use std::io::{self, Read as IoRead, Seek, SeekFrom, Write as IoWrite};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -209,26 +209,38 @@ impl Vfs for EncryptedVfs {
         let (file, canonical_path) = match path {
             Some(p) => {
                 let pb = PathBuf::from(p);
-                let f = OpenOptions::new()
-                    .read(true)
-                    .write(!is_readonly)
-                    .create(!is_readonly)
+                let mut opts = OpenOptions::new();
+                opts.read(true).write(!is_readonly).create(!is_readonly);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    opts.mode(0o600);
+                }
+                let f = opts
                     .open(p)
                     .map_err(|_| sqlite_plugin::vars::SQLITE_CANTOPEN)?;
                 (f, Some(pb))
             }
             None => {
+                // Unpredictable name + O_EXCL (`create_new`) + 0600 defeats symlink
+                // and pre-creation attacks on the shared temp directory.
+                let mut rand = [0u8; 16];
+                getrandom::fill(&mut rand).map_err(|_| sqlite_plugin::vars::SQLITE_CANTOPEN)?;
                 let mut tmp = std::env::temp_dir();
                 tmp.push(format!(
-                    "cryptex-tmp-{}-{}.db",
+                    "cryptex-tmp-{}-{}-{}.db",
                     std::process::id(),
-                    VFS_COUNTER.fetch_add(1, Ordering::Relaxed)
+                    VFS_COUNTER.fetch_add(1, Ordering::Relaxed),
+                    hex::encode(rand)
                 ));
-                let f = OpenOptions::new()
-                    .read(true)
-                    .write(true)
-                    .create(true)
-                    .truncate(false)
+                let mut opts = OpenOptions::new();
+                opts.read(true).write(true).create_new(true);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    opts.mode(0o600);
+                }
+                let f = opts
                     .open(&tmp)
                     .map_err(|_| sqlite_plugin::vars::SQLITE_CANTOPEN)?;
                 (f, Some(tmp))
@@ -447,6 +459,12 @@ pub struct EncryptedVfsKeyring {
     conn: Connection,
     vfs: EncryptedVfs,
     db_path: PathBuf,
+    /// Exclusive advisory lock on a sidecar file, held for the keyring's
+    /// lifetime. Guarantees a single opener: the encrypted VFS performs no
+    /// SQLite-level locking, so concurrent opens would otherwise corrupt the
+    /// database. Released automatically when the keyring is dropped. A sidecar
+    /// (not the db file) is locked so the lock survives `rekey`'s atomic rename.
+    _lock: File,
 }
 
 unsafe impl Send for EncryptedVfsKeyring {}
@@ -454,10 +472,7 @@ unsafe impl Sync for EncryptedVfsKeyring {}
 
 impl DynKeyRing for EncryptedVfsKeyring {
     fn get_secret(&mut self, id: &str) -> Result<KeyRingSecret> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT value FROM secrets WHERE id=?")
-            .unwrap();
+        let mut stmt = self.conn.prepare("SELECT value FROM secrets WHERE id=?")?;
         let val = stmt.query_row(params![id], |row| {
             let s: String = row.get(0)?;
             hex::decode(s).map_err(|_| rusqlite::Error::InvalidQuery)
@@ -467,22 +482,16 @@ impl DynKeyRing for EncryptedVfsKeyring {
 
     fn set_secret(&mut self, id: &str, secret: &[u8]) -> Result<()> {
         let encoded = hex::encode(secret);
-        let mut stmt = self
-            .conn
-            .prepare(
-                "INSERT INTO secrets(id, value) VALUES(?, ?) \
-                 ON CONFLICT(id) DO UPDATE SET value=?",
-            )
-            .expect("SQL statement to work");
+        let mut stmt = self.conn.prepare(
+            "INSERT INTO secrets(id, value) VALUES(?, ?) \
+             ON CONFLICT(id) DO UPDATE SET value=?",
+        )?;
         stmt.execute(params![id, encoded.clone(), encoded])?;
         Ok(())
     }
 
     fn delete_secret(&mut self, id: &str) -> Result<()> {
-        let mut stmt = self
-            .conn
-            .prepare("DELETE FROM secrets WHERE id=?")
-            .expect("SQL statement to work");
+        let mut stmt = self.conn.prepare("DELETE FROM secrets WHERE id=?")?;
         stmt.execute(params![id])?;
         Ok(())
     }
@@ -497,7 +506,7 @@ impl NewKeyRing for EncryptedVfsKeyring {
 
 impl EncryptedVfsKeyring {
     pub fn with_params(connection: &ConnectionParams, path: Option<PathBuf>) -> Result<Self> {
-        let key_zeroizing = derive_key(connection);
+        let key_zeroizing = derive_key(connection)?;
         if key_zeroizing.len() != 32 {
             return Err(KeyRingError::GeneralError {
                 msg: "derived key must be 32 bytes".to_string(),
@@ -511,7 +520,11 @@ impl EncryptedVfsKeyring {
 
         let vfs_for_keyring = vfs.clone();
         let vfs_name = register_encrypted_vfs(vfs)?;
-        let db_path = get_keyring_file(path);
+        let db_path = get_keyring_file(path)?;
+
+        // Fail fast if another opener already holds the keyring, before touching
+        // the database. The encrypted VFS does no SQLite-level locking.
+        let lock = acquire_single_opener_lock(&db_path)?;
 
         let conn = Connection::open_with_flags_and_vfs(
             &db_path,
@@ -538,6 +551,7 @@ impl EncryptedVfsKeyring {
             conn,
             vfs: vfs_for_keyring,
             db_path,
+            _lock: lock,
         })
     }
 
@@ -546,7 +560,7 @@ impl EncryptedVfsKeyring {
     /// Writes to a temp file first, then atomically renames — original is
     /// untouched until the rename succeeds.
     pub fn rekey(&self, new_params: &ConnectionParams) -> Result<()> {
-        let new_key_zeroizing = derive_key(new_params);
+        let new_key_zeroizing = derive_key(new_params)?;
         if new_key_zeroizing.len() != 32 {
             return Err(KeyRingError::GeneralError {
                 msg: "new key must be 32 bytes".to_string(),
@@ -564,7 +578,15 @@ impl EncryptedVfsKeyring {
         let tmp_path = self.db_path.with_extension("cryptex-rekey-tmp");
         let src = File::open(&self.db_path)
             .map_err(|e| KeyRingError::GeneralError { msg: e.to_string() })?;
-        let mut dst = File::create(&tmp_path)
+        let mut dst_opts = OpenOptions::new();
+        dst_opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            dst_opts.mode(0o600);
+        }
+        let mut dst = dst_opts
+            .open(&tmp_path)
             .map_err(|e| KeyRingError::GeneralError { msg: e.to_string() })?;
 
         let state = self
@@ -625,7 +647,7 @@ impl EncryptedVfsKeyring {
 
 // ─── Key derivation & path helpers ───────────────────────────────────────────
 
-fn derive_key(params: &ConnectionParams) -> Zeroizing<Vec<u8>> {
+fn derive_key(params: &ConnectionParams) -> Result<Zeroizing<Vec<u8>>> {
     if params.key.is_empty() {
         let argon2_params = Argon2Params::new(
             params.memory,
@@ -633,21 +655,64 @@ fn derive_key(params: &ConnectionParams) -> Zeroizing<Vec<u8>> {
             params.parallel,
             Some(Argon2Params::DEFAULT_OUTPUT_LEN),
         )
-        .unwrap();
+        .map_err(|e| KeyRingError::GeneralError {
+            msg: format!("invalid Argon2 parameters: {}", e),
+        })?;
         let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, argon2_params);
         let mut okm = [0u8; 32];
         argon2
             .hash_password_into(&params.password, &params.salt, &mut okm)
-            .unwrap();
+            .map_err(|e| KeyRingError::GeneralError {
+                msg: format!("Argon2 key derivation failed: {}", e),
+            })?;
         let result = Zeroizing::new(okm.to_vec());
         okm.zeroize();
-        result
+        Ok(result)
     } else {
-        Zeroizing::new(params.key.to_vec())
+        Ok(Zeroizing::new(params.key.to_vec()))
     }
 }
 
-fn get_keyring_file(in_path: Option<PathBuf>) -> PathBuf {
+/// Acquire an exclusive advisory lock guaranteeing a single opener of the
+/// keyring. A sidecar `<db>.lock` file is locked (not the database itself) so
+/// the lock is unaffected by `rekey`'s atomic rename of the database file. The
+/// returned handle must be kept alive for the keyring's lifetime; the OS
+/// releases the lock when the handle is dropped or the process exits, so a
+/// crashed process never leaves a stale lock behind.
+fn acquire_single_opener_lock(db_path: &Path) -> Result<File> {
+    let mut lock_path = db_path.as_os_str().to_os_string();
+    lock_path.push(".lock");
+    let lock_path = PathBuf::from(lock_path);
+
+    let mut opts = OpenOptions::new();
+    opts.read(true).write(true).create(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let file = opts
+        .open(&lock_path)
+        .map_err(|e| KeyRingError::GeneralError {
+            msg: format!(
+                "unable to open keyring lock file {}: {}",
+                lock_path.display(),
+                e
+            ),
+        })?;
+
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(TryLockError::WouldBlock) => Err(KeyRingError::AccessDenied {
+            msg: "keyring is already open by another process".to_string(),
+        }),
+        Err(TryLockError::Error(e)) => Err(KeyRingError::GeneralError {
+            msg: format!("unable to lock keyring: {}", e),
+        }),
+    }
+}
+
+fn get_keyring_file(in_path: Option<PathBuf>) -> Result<PathBuf> {
     let mut path = match in_path {
         None => {
             let mut p = dirs::home_dir().unwrap_or_else(|| {
@@ -663,12 +728,30 @@ fn get_keyring_file(in_path: Option<PathBuf>) -> PathBuf {
     };
 
     if !path.is_dir() {
-        fs::create_dir_all(&path)
-            .unwrap_or_else(|_| panic!("Unable to create folder: {}", path.display()));
+        fs::create_dir_all(&path).map_err(|e| KeyRingError::GeneralError {
+            msg: format!("unable to create folder {}: {}", path.display(), e),
+        })?;
     }
+    secure_dir(&path)?;
     make_hidden(&path);
     path.push("keyring.db3");
-    path
+    Ok(path)
+}
+
+#[cfg(unix)]
+fn secure_dir(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|e| {
+        KeyRingError::GeneralError {
+            msg: format!("unable to secure folder {}: {}", path.display(), e),
+        }
+    })
+}
+
+#[cfg(not(unix))]
+fn secure_dir(_path: &Path) -> Result<()> {
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]
@@ -750,7 +833,11 @@ impl FromStr for ConnectionParams {
 impl ConnectionParams {
     fn param(&mut self, key: &str, value: &str) -> Result<()> {
         match key {
-            "key" => self.key = hex::decode(value).unwrap(),
+            "key" => {
+                self.key = hex::decode(value).map_err(|e| KeyRingError::GeneralError {
+                    msg: format!("invalid hex key: {}", e),
+                })?
+            }
             "password" => self.password = value.as_bytes().to_vec(),
             "salt" => self.salt = value.as_bytes().to_vec(),
             "cipher" => {
@@ -1013,6 +1100,35 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_open_is_rejected() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".test-evfs-concurrent");
+        let _ = fs::remove_dir_all(&path);
+
+        let p = params("password=concurrent_test salt=1qaz2wsx3edc4rfv5tgb");
+
+        let first = EncryptedVfsKeyring::with_params(&p, Some(path.clone())).unwrap();
+
+        // A second opener must be rejected while the first is alive.
+        let second = EncryptedVfsKeyring::with_params(&p, Some(path.clone()));
+        assert!(
+            matches!(second, Err(crate::error::KeyRingError::AccessDenied { .. })),
+            "expected AccessDenied for concurrent open, got: {:?}",
+            second.err()
+        );
+
+        // After the first is dropped, the lock releases and reopening succeeds.
+        drop(first);
+        let reopened = EncryptedVfsKeyring::with_params(&p, Some(path.clone()));
+        assert!(
+            reopened.is_ok(),
+            "reopen after drop failed: {:?}",
+            reopened.err()
+        );
+
+        let _ = fs::remove_dir_all(&path);
+    }
+
+    #[test]
     fn wrong_key_fails() {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".test-evfs-wrongkey");
         let _ = fs::remove_dir_all(&path);
@@ -1031,6 +1147,12 @@ mod tests {
         }
 
         let _ = fs::remove_dir_all(&path);
+    }
+
+    #[test]
+    fn invalid_hex_key_is_an_error() {
+        let result = "key=not-hex".parse::<ConnectionParams>();
+        assert!(result.is_err());
     }
 
     #[test]

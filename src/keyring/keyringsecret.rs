@@ -144,8 +144,8 @@ impl Display for KeyRingSecret {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
-            "KeyRingSecret {{ {} }}",
-            hex::encode(&self.0[..])
+            "KeyRingSecret {{ redacted, len: {} }}",
+            self.len()
         )
     }
 }
@@ -154,8 +154,8 @@ impl Debug for KeyRingSecret {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
-            "KeyRingSecret {{ {} }}",
-            hex::encode(&self.0[..])
+            "KeyRingSecret {{ redacted, len: {} }}",
+            self.len()
         )
     }
 }
@@ -227,5 +227,25 @@ impl<'a> Deserialize<'a> for KeyRingSecret {
         }
 
         deserializer.deserialize_str(Thingvisitor)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::KeyRingSecret;
+
+    #[test]
+    fn debug_and_display_redact_secret_bytes() {
+        let secret = KeyRingSecret::from(b"super-secret".as_slice());
+
+        let debug = format!("{secret:?}");
+        let display = format!("{secret}");
+
+        assert!(debug.contains("redacted"));
+        assert!(display.contains("redacted"));
+        assert!(!debug.contains("super-secret"));
+        assert!(!display.contains("super-secret"));
+        assert!(!debug.contains("73757065722d736563726574"));
+        assert!(!display.contains("73757065722d736563726574"));
     }
 }

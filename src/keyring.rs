@@ -223,8 +223,9 @@ pub(crate) fn parse_peek_criteria(id: &str) -> BTreeMap<String, String> {
     let mut result = BTreeMap::new();
     if !id.is_empty() {
         for pair in id.split(',') {
-            let s = pair.split('=').collect::<Vec<&str>>();
-            result.insert(s[0].to_string(), s[1].to_string());
+            if let Some((key, value)) = pair.split_once('=') {
+                result.insert(key.to_string(), value.to_string());
+            }
         }
     }
     result
