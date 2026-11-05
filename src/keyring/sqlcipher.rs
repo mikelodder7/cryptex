@@ -3,55 +3,28 @@
     SPDX-License-Identifier: Apache-2.0
 */
 use super::*;
-use argon2::{Algorithm, Argon2, Params as Argon2Params, Version};
-use rusqlite::{Connection, params};
+use rusqlite::Connection;
+use std::path::PathBuf;
+use std::sync::Mutex;
+use zeroize::Zeroizing;
 
+use super::file_common::{NoCipher, derive_key, file_keyring, get_keyring_file, secure_file};
+use super::sqlite_common::{KEYRING_FILE, init_schema, lock_connection};
 use crate::error::KeyRingError;
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
-use std::{fs, iter};
-use zeroize::{Zeroize, Zeroizing};
 
+/// The connection params for [`SqlCipherKeyring`]. The cipher is fixed by
+/// SQLCipher and cannot be chosen.
+pub type ConnectionParams = file_common::ConnectionParams<NoCipher>;
+
+/// A keyring stored in a [SQLCipher](https://www.zetetic.net/sqlcipher/)
+/// database. The default file is `~/.cryptex/keyring.db3`.
 pub struct SqlCipherKeyring {
-    conn: Connection,
+    /// `Connection` is `Send` but not `Sync`; the mutex makes the keyring
+    /// `Sync` and lets `rekey` take `&self`.
+    conn: Mutex<Connection>,
 }
 
-unsafe impl Send for SqlCipherKeyring {}
-
-unsafe impl Sync for SqlCipherKeyring {}
-
-impl DynKeyRing for SqlCipherKeyring {
-    fn get_secret(&mut self, id: &str) -> Result<KeyRingSecret> {
-        let mut stmt = self.conn.prepare("SELECT value FROM secrets WHERE id=?")?;
-        let val = stmt.query_row(params![id], |row| {
-            let s: String = row.get(0)?;
-            hex::decode(s).map_err(|_e| rusqlite::Error::InvalidQuery)
-        })?;
-        Ok(KeyRingSecret(val))
-    }
-
-    fn set_secret(&mut self, id: &str, secret: &[u8]) -> Result<()> {
-        let secret = hex::encode(secret);
-        let mut stmt = self.conn.prepare(
-            "INSERT INTO secrets(id, value) VALUES(?, ?) ON CONFLICT(id) DO UPDATE SET value=?",
-        )?;
-        stmt.execute(params![id, secret.clone(), secret])?;
-        Ok(())
-    }
-
-    fn delete_secret(&mut self, id: &str) -> Result<()> {
-        let mut stmt = self.conn.prepare("DELETE FROM secrets WHERE id=?")?;
-        stmt.execute(params![id])?;
-        Ok(())
-    }
-}
-
-impl NewKeyRing for SqlCipherKeyring {
-    fn new<S: AsRef<str>>(lock_key: S) -> Result<Self> {
-        let connection = lock_key.as_ref().parse::<ConnectionParams>()?;
-        Self::with_params(&connection, None)
-    }
-}
+file_keyring!(SqlCipherKeyring, conn);
 
 impl SqlCipherKeyring {
     /// Re-encrypt the entire database with a new key derived from `new_params`.
@@ -60,492 +33,41 @@ impl SqlCipherKeyring {
     /// After a successful rekey the current connection uses the new key;
     /// any future opens must use `new_params`.
     pub fn rekey(&self, new_params: &ConnectionParams) -> Result<()> {
-        let new_key = derive_key(new_params)?;
-        let mut hex_key = hex::encode(&*new_key);
-        let result = self
-            .conn
-            .pragma_update(None, "rekey", &hex_key)
+        let hex_key = Zeroizing::new(hex::encode(&*derive_key(new_params)?));
+        lock_connection(&self.conn)?
+            .pragma_update(None, "rekey", hex_key.as_str())
             .map_err(|e| KeyRingError::GeneralError {
                 msg: format!("PRAGMA rekey failed: {}", e),
-            });
-        hex_key.zeroize();
-        result
+            })
     }
 
-    /// Create a new keyring with the connection params
+    /// Open (or create) the keyring in `path` (default `~/.cryptex`).
     pub fn with_params(connection: &ConnectionParams, path: Option<PathBuf>) -> Result<Self> {
-        let key = derive_key(connection)?;
-        let db_path = get_keyring_file(path)?;
+        let hex_key = Zeroizing::new(hex::encode(&*derive_key(connection)?));
+        let db_path = get_keyring_file(path, KEYRING_FILE)?;
         let conn = Connection::open(&db_path)?;
         secure_file(&db_path)?;
-        let mut hex_key = hex::encode(&*key);
-        conn.pragma_update(None, "key", &hex_key)
+        conn.pragma_update(None, "key", hex_key.as_str())
             .map_err(|e| KeyRingError::GeneralError {
                 msg: format!("unable to set keyring key: {}", e),
             })?;
-        hex_key.zeroize();
         conn.pragma_update(None, "cipher_memory_security", "ON")
             .map_err(|e| KeyRingError::GeneralError {
                 msg: format!("cannot set memory sanitization: {}", e),
             })?;
-        conn.query_row("SELECT COUNT(*) FROM `sqlite_master`;", params![], |_row| {
-            Ok(())
-        })?;
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS secrets (id TEXT UNIQUE NOT NULL, value TEXT NOT NULL)",
-            (),
-        )?;
-        Ok(Self { conn })
-    }
-}
-
-/// Derive the raw encryption key from [`ConnectionParams`].
-///
-/// If `params.key` is set, returns it directly; otherwise derives a 32-byte
-/// key from the password + salt via Argon2id.
-fn derive_key(params: &ConnectionParams) -> Result<Zeroizing<Vec<u8>>> {
-    if params.key.is_empty() {
-        let argon2_params = Argon2Params::new(
-            params.memory,
-            params.threads,
-            params.parallel,
-            Some(Argon2Params::DEFAULT_OUTPUT_LEN),
-        )
-        .map_err(|e| KeyRingError::GeneralError {
-            msg: format!("invalid Argon2 parameters: {}", e),
-        })?;
-        let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, argon2_params);
-        let mut okm = [0u8; 32];
-        argon2
-            .hash_password_into(&params.password, &params.salt, &mut okm)
-            .map_err(|e| KeyRingError::GeneralError {
-                msg: format!("Argon2 key derivation failed: {}", e),
-            })?;
-        let result = Zeroizing::new(okm.to_vec());
-        okm.zeroize();
-        Ok(result)
-    } else {
-        Ok(Zeroizing::new(params.key.to_vec()))
-    }
-}
-
-fn get_keyring_file(in_path: Option<PathBuf>) -> Result<PathBuf> {
-    let mut path = match in_path {
-        None => {
-            let mut path = dirs::home_dir().unwrap_or_else(|| {
-                dirs::document_dir().unwrap_or_else(|| {
-                    dirs::data_local_dir()
-                        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR").to_string()))
-                })
-            });
-            path.push(format!(".{}", env!("CARGO_PKG_NAME")));
-            path
-        }
-        Some(path) => path,
-    };
-
-    if !path.is_dir() {
-        fs::create_dir_all(&path).map_err(|e| KeyRingError::GeneralError {
-            msg: format!("unable to create folder {}: {}", path.display(), e),
-        })?;
-    }
-    secure_dir(&path)?;
-    make_hidden(&path);
-    path.push("keyring.db3");
-    Ok(path)
-}
-
-#[cfg(unix)]
-fn secure_dir(path: &Path) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|e| {
-        KeyRingError::GeneralError {
-            msg: format!("unable to secure folder {}: {}", path.display(), e),
-        }
-    })
-}
-
-#[cfg(not(unix))]
-fn secure_dir(_path: &Path) -> Result<()> {
-    Ok(())
-}
-
-/// Restrict the database file itself to owner-only access (defense in depth
-/// beyond the `0o700` parent directory).
-#[cfg(unix)]
-fn secure_file(path: &Path) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|e| {
-        KeyRingError::GeneralError {
-            msg: format!("unable to secure keyring file {}: {}", path.display(), e),
-        }
-    })
-}
-
-#[cfg(not(unix))]
-fn secure_file(_path: &Path) -> Result<()> {
-    Ok(())
-}
-
-#[cfg(target_os = "windows")]
-fn make_hidden(path: &Path) {
-    use std::ffi::OsStr;
-    use std::iter::once;
-    use std::os::windows::ffi::OsStrExt;
-
-    const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
-
-    unsafe extern "system" {
-        fn SetFileAttributesW(lpfilename: *const u16, dwfileattributes: u32) -> i32;
-    }
-
-    let wide: Vec<u16> = OsStr::new(path).encode_wide().chain(once(0)).collect();
-    unsafe {
-        SetFileAttributesW(wide.as_ptr(), FILE_ATTRIBUTE_HIDDEN);
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn make_hidden(_path: &Path) {}
-
-/// The connection params for SqlCipherKeyRing
-///
-/// [`ConnectionParams`] supports passing the values as a string
-/// similar to postgres.
-///
-/// ```
-/// use cryptex::sqlcipher::ConnectionParams;
-///
-/// let params = "password=1qaz2wsx3edc4rfv salt=0okm9ijn8uhb7ygv".parse::<ConnectionParams>().unwrap();
-/// ```
-///
-/// or with extra parameters. `memory` is Argon2's memory cost in KiB blocks.
-///
-/// ```
-/// use cryptex::sqlcipher::ConnectionParams;
-///
-/// let params = "password=1qaz2wsx3edc4rfv salt=0okm9ijn8uhb7ygv memory=32768 threads=3 parallel=2".parse::<ConnectionParams>().unwrap();
-/// ```
-#[derive(Zeroize)]
-pub struct ConnectionParams {
-    /// The key used to open the keyring. This is used mutually exclusive
-    /// with password and salt
-    pub key: Vec<u8>,
-    /// The password to use to open the keyring
-    pub password: Vec<u8>,
-    /// The salt to use when hashing the password
-    pub salt: Vec<u8>,
-    /// The Argon2 memory cost in KiB blocks
-    pub memory: u32,
-    /// The number of iterations or threads requirement
-    pub threads: u32,
-    /// The parallel requirement
-    pub parallel: u32,
-}
-
-impl Default for ConnectionParams {
-    fn default() -> Self {
-        let m_cost = default_memory_cost();
-        let threads = default_threads();
-        let parallel = default_parallel();
-        Self {
-            key: vec![],
-            password: vec![],
-            salt: vec![],
-            memory: m_cost,
-            threads,
-            parallel,
-        }
-    }
-}
-
-impl Drop for ConnectionParams {
-    fn drop(&mut self) {
-        self.key.zeroize();
-        self.password.zeroize();
-        self.salt.zeroize();
-    }
-}
-
-impl FromStr for ConnectionParams {
-    type Err = KeyRingError;
-
-    fn from_str(s: &str) -> Result<Self> {
-        Parser::parse(s)
-    }
-}
-
-impl ConnectionParams {
-    fn param(&mut self, key: &str, value: &str) -> Result<()> {
-        match key {
-            "key" => {
-                self.key = hex::decode(value).map_err(|e| KeyRingError::GeneralError {
-                    msg: format!("invalid hex key: {}", e),
-                })?
-            }
-            "password" => self.password = value.as_bytes().to_vec(),
-            "salt" => self.salt = value.as_bytes().to_vec(),
-            "memory" => {
-                let m_cost = value
-                    .parse::<u32>()
-                    .map_err(|e| KeyRingError::GeneralError {
-                        msg: format!("expected an integer for memory: {}", e),
-                    })?;
-                if !(Argon2Params::DEFAULT_M_COST..Argon2Params::MAX_M_COST).contains(&m_cost) {
-                    return Err(KeyRingError::GeneralError {
-                        msg: format!(
-                            "invalid value for memory must be between {} and {}",
-                            Argon2Params::DEFAULT_M_COST,
-                            Argon2Params::MAX_M_COST
-                        ),
-                    });
-                }
-                self.memory = m_cost;
-            }
-            "threads" => {
-                let t_cost = value
-                    .parse::<u32>()
-                    .map_err(|e| KeyRingError::GeneralError {
-                        msg: format!("expected an integer for threads: {}", e),
-                    })?;
-                if !(Argon2Params::DEFAULT_T_COST..Argon2Params::MAX_T_COST).contains(&t_cost) {
-                    return Err(KeyRingError::GeneralError {
-                        msg: format!(
-                            "invalid value for threads must be between {} and {}",
-                            Argon2Params::DEFAULT_T_COST,
-                            Argon2Params::MAX_T_COST
-                        ),
-                    });
-                }
-                self.threads = t_cost;
-            }
-            "parallel" => {
-                let p_cost = value
-                    .parse::<u32>()
-                    .map_err(|e| KeyRingError::GeneralError {
-                        msg: format!("expected an integer for degree of parallelism: {}", e),
-                    })?;
-                if !(Argon2Params::DEFAULT_P_COST..Argon2Params::MAX_P_COST).contains(&p_cost) {
-                    return Err(KeyRingError::GeneralError {
-                        msg: format!(
-                            "invalid value for degree of parallelism must be between {} and {}",
-                            Argon2Params::DEFAULT_P_COST,
-                            Argon2Params::MAX_P_COST
-                        ),
-                    });
-                }
-                self.parallel = p_cost;
-            }
-            _ => {
-                return Err(KeyRingError::GeneralError {
-                    msg: format!("unknown parameter: {}", key),
-                });
-            }
-        };
-        Ok(())
-    }
-
-    /// Set the key
-    pub fn key(&mut self, key: &[u8]) -> &mut Self {
-        self.key = key.to_vec();
-        self
-    }
-
-    /// Set the password
-    pub fn password(&mut self, password: &[u8]) -> &mut Self {
-        self.password = password.to_vec();
-        self
-    }
-
-    /// Set the salt
-    pub fn salt(&mut self, salt: &[u8]) -> &mut Self {
-        self.salt = salt.to_vec();
-        self
-    }
-
-    /// Set the memory cost
-    pub fn memory(&mut self, cost: u32) -> &mut Self {
-        self.memory = cost;
-        self
-    }
-
-    /// Set the time cost
-    pub fn time(&mut self, cost: u32) -> &mut Self {
-        self.threads = cost;
-        self
-    }
-
-    /// Set the parallel cost
-    pub fn parallel(&mut self, cost: u32) -> &mut Self {
-        self.parallel = cost;
-        self
-    }
-}
-
-struct Parser<'a> {
-    s: &'a str,
-    it: iter::Peekable<std::str::CharIndices<'a>>,
-}
-
-impl<'a> Parser<'a> {
-    fn parse(s: &'a str) -> Result<ConnectionParams> {
-        let mut parser = Parser {
-            s,
-            it: s.char_indices().peekable(),
-        };
-
-        let mut connection_string = ConnectionParams::default();
-
-        while let Some((key, value)) = parser.parameter()? {
-            connection_string.param(key, &value)?;
-        }
-        Ok(connection_string)
-    }
-
-    fn skip_ws(&mut self) {
-        self.take_while(char::is_whitespace);
-    }
-
-    fn take_while<F>(&mut self, f: F) -> &'a str
-    where
-        F: Fn(char) -> bool,
-    {
-        let start = match self.it.peek() {
-            Some(&(i, _)) => i,
-            None => return "",
-        };
-
-        loop {
-            match self.it.peek() {
-                Some(&(_, c)) if f(c) => {
-                    self.it.next();
-                }
-                Some(&(i, _)) => return &self.s[start..i],
-                None => return &self.s[start..],
-            }
-        }
-    }
-
-    fn consume(&mut self, target: char) -> Result<()> {
-        match self.it.next() {
-            Some((_, c)) if c == target => Ok(()),
-            Some((i, c)) => Err(KeyRingError::GeneralError {
-                msg: format!(
-                    "unexpected character at byte {}: expected `{}` but got `{}`",
-                    i, target, c
-                ),
-            }),
-            None => Err(KeyRingError::GeneralError {
-                msg: "unexpected EOF".to_string(),
-            }),
-        }
-    }
-
-    fn consume_if(&mut self, target: char) -> bool {
-        match self.it.peek() {
-            Some(&(_, c)) if c == target => {
-                self.it.next();
-                true
-            }
-            _ => false,
-        }
-    }
-
-    fn keyword(&mut self) -> Option<&'a str> {
-        let s = self.take_while(|c| match c {
-            c if c.is_whitespace() => false,
-            '=' => false,
-            _ => true,
-        });
-
-        if s.is_empty() { None } else { Some(s) }
-    }
-
-    fn value(&mut self) -> Result<String> {
-        let value = if self.consume_if('\'') {
-            let value = self.quoted_value()?;
-            self.consume('\'')?;
-            value
-        } else {
-            self.simple_value()?
-        };
-
-        Ok(value)
-    }
-
-    fn simple_value(&mut self) -> Result<String> {
-        let mut value = String::new();
-
-        while let Some(&(_, c)) = self.it.peek() {
-            if c.is_whitespace() {
-                break;
-            }
-
-            self.it.next();
-            if c == '\\' {
-                if let Some((_, c2)) = self.it.next() {
-                    value.push(c2);
-                }
-            } else {
-                value.push(c);
-            }
-        }
-
-        if value.is_empty() {
-            return Err(KeyRingError::GeneralError {
-                msg: "unexpected EOF".to_string(),
-            });
-        }
-
-        Ok(value)
-    }
-
-    fn quoted_value(&mut self) -> Result<String> {
-        let mut value = String::new();
-
-        while let Some(&(_, c)) = self.it.peek() {
-            if c == '\'' {
-                return Ok(value);
-            }
-
-            self.it.next();
-            if c == '\\' {
-                if let Some((_, c2)) = self.it.next() {
-                    value.push(c2);
-                }
-            } else {
-                value.push(c);
-            }
-        }
-
-        Err(KeyRingError::GeneralError {
-            msg: "unterminated quoted connection parameter value".to_string(),
+        init_schema(&conn)?;
+        Ok(Self {
+            conn: Mutex::new(conn),
         })
-    }
-
-    fn parameter(&mut self) -> Result<Option<(&'a str, String)>> {
-        self.skip_ws();
-        let keyword = match self.keyword() {
-            Some(keyword) => keyword,
-            None => return Ok(None),
-        };
-        self.skip_ws();
-        self.consume('=')?;
-        self.skip_ws();
-        let value = self.value()?;
-
-        Ok(Some((keyword, value)))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ConnectionParams, SqlCipherKeyring, get_keyring_file};
+    use super::{ConnectionParams, KEYRING_FILE, SqlCipherKeyring, get_keyring_file};
+    use crate::file_common::test_support::TestDir;
     use crate::{KeyRing, NewKeyRing};
     use std::fs;
-    use std::path::PathBuf;
 
     #[test]
     #[cfg_attr(
@@ -554,7 +76,7 @@ mod tests {
     )]
     fn works() {
         {
-            let file = get_keyring_file(None).unwrap();
+            let file = get_keyring_file(None, KEYRING_FILE).unwrap();
             let _ = fs::remove_dir_all(file);
         }
         {
@@ -589,7 +111,7 @@ mod tests {
             assert!(res_keyring.is_err());
         }
         {
-            let file = get_keyring_file(None).unwrap();
+            let file = get_keyring_file(None, KEYRING_FILE).unwrap();
             let _ = fs::remove_dir_all(file);
         }
     }
@@ -606,8 +128,7 @@ mod tests {
         ignore = "SQLCipher rekey overflows the Windows test stack in CI"
     )]
     fn rekey_works() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".test_rekey");
-        let _ = fs::remove_dir_all(&path);
+        let dir = TestDir::new(".test_rekey");
 
         let old_params = "password=old_password salt=old_salt_value_here"
             .parse::<ConnectionParams>()
@@ -619,7 +140,7 @@ mod tests {
         // Open with old key, store a secret, then rekey
         {
             let mut keyring =
-                SqlCipherKeyring::with_params(&old_params, Some(path.clone())).unwrap();
+                SqlCipherKeyring::with_params(&old_params, dir.keyring_dir()).unwrap();
             keyring.set_secret("rekey_test", b"my_secret_data").unwrap();
             keyring.rekey(&new_params).unwrap();
         }
@@ -627,18 +148,16 @@ mod tests {
         // Reopen with new key — secret should still be accessible
         {
             let mut keyring =
-                SqlCipherKeyring::with_params(&new_params, Some(path.clone())).unwrap();
+                SqlCipherKeyring::with_params(&new_params, dir.keyring_dir()).unwrap();
             let secret = keyring.get_secret("rekey_test").unwrap();
             assert_eq!(secret.0, b"my_secret_data");
         }
 
         // Old key should fail to open the rekeyed database
         {
-            let result = SqlCipherKeyring::with_params(&old_params, Some(path.clone()));
+            let result = SqlCipherKeyring::with_params(&old_params, dir.keyring_dir());
             assert!(result.is_err());
         }
-
-        let _ = fs::remove_dir_all(&path);
     }
 
     #[test]
@@ -647,8 +166,7 @@ mod tests {
         ignore = "SQLCipher rekey overflows the Windows test stack in CI"
     )]
     fn rekey_preserves_multiple_secrets() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".test_rekey_multi");
-        let _ = fs::remove_dir_all(&path);
+        let dir = TestDir::new(".test_rekey_multi");
 
         let old_params = "password=old_pass salt=old_salt_value_here"
             .parse::<ConnectionParams>()
@@ -659,7 +177,7 @@ mod tests {
 
         {
             let mut keyring =
-                SqlCipherKeyring::with_params(&old_params, Some(path.clone())).unwrap();
+                SqlCipherKeyring::with_params(&old_params, dir.keyring_dir()).unwrap();
             keyring.set_secret("alpha", b"secret_alpha").unwrap();
             keyring.set_secret("beta", b"secret_beta").unwrap();
             keyring.set_secret("gamma", b"secret_gamma").unwrap();
@@ -668,13 +186,11 @@ mod tests {
 
         {
             let mut keyring =
-                SqlCipherKeyring::with_params(&new_params, Some(path.clone())).unwrap();
+                SqlCipherKeyring::with_params(&new_params, dir.keyring_dir()).unwrap();
             assert_eq!(keyring.get_secret("alpha").unwrap().0, b"secret_alpha");
             assert_eq!(keyring.get_secret("beta").unwrap().0, b"secret_beta");
             assert_eq!(keyring.get_secret("gamma").unwrap().0, b"secret_gamma");
         }
-
-        let _ = fs::remove_dir_all(&path);
     }
 
     #[test]
@@ -683,8 +199,7 @@ mod tests {
         ignore = "SQLCipher rekey overflows the Windows test stack in CI"
     )]
     fn rekey_allows_continued_use_on_same_connection() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".test_rekey_continue");
-        let _ = fs::remove_dir_all(&path);
+        let dir = TestDir::new(".test_rekey_continue");
 
         let old_params = "password=old_pass salt=old_salt_value_here"
             .parse::<ConnectionParams>()
@@ -695,7 +210,7 @@ mod tests {
 
         {
             let mut keyring =
-                SqlCipherKeyring::with_params(&old_params, Some(path.clone())).unwrap();
+                SqlCipherKeyring::with_params(&old_params, dir.keyring_dir()).unwrap();
             keyring.set_secret("before", b"before_rekey").unwrap();
             keyring.rekey(&new_params).unwrap();
 
@@ -710,12 +225,10 @@ mod tests {
         // Reopen with new params to confirm persistence
         {
             let mut keyring =
-                SqlCipherKeyring::with_params(&new_params, Some(path.clone())).unwrap();
+                SqlCipherKeyring::with_params(&new_params, dir.keyring_dir()).unwrap();
             assert!(keyring.get_secret("before").is_err());
             assert_eq!(keyring.get_secret("after").unwrap().0, b"after_rekey");
         }
-
-        let _ = fs::remove_dir_all(&path);
     }
 
     #[test]
@@ -724,8 +237,7 @@ mod tests {
         ignore = "SQLCipher rekey overflows the Windows test stack in CI"
     )]
     fn rekey_sequential() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".test_rekey_seq");
-        let _ = fs::remove_dir_all(&path);
+        let dir = TestDir::new(".test_rekey_seq");
 
         let params_a = "password=pass_a salt=salt_value_a_here_"
             .parse::<ConnectionParams>()
@@ -739,7 +251,7 @@ mod tests {
 
         // Create with A, rekey to B, then rekey to C
         {
-            let mut keyring = SqlCipherKeyring::with_params(&params_a, Some(path.clone())).unwrap();
+            let mut keyring = SqlCipherKeyring::with_params(&params_a, dir.keyring_dir()).unwrap();
             keyring.set_secret("seq", b"sequential_data").unwrap();
             keyring.rekey(&params_b).unwrap();
             keyring.rekey(&params_c).unwrap();
@@ -747,15 +259,13 @@ mod tests {
 
         // Only C should work
         {
-            let mut keyring = SqlCipherKeyring::with_params(&params_c, Some(path.clone())).unwrap();
+            let mut keyring = SqlCipherKeyring::with_params(&params_c, dir.keyring_dir()).unwrap();
             assert_eq!(keyring.get_secret("seq").unwrap().0, b"sequential_data");
         }
 
         // A and B should fail
-        assert!(SqlCipherKeyring::with_params(&params_a, Some(path.clone())).is_err());
-        assert!(SqlCipherKeyring::with_params(&params_b, Some(path.clone())).is_err());
-
-        let _ = fs::remove_dir_all(&path);
+        assert!(SqlCipherKeyring::with_params(&params_a, dir.keyring_dir()).is_err());
+        assert!(SqlCipherKeyring::with_params(&params_b, dir.keyring_dir()).is_err());
     }
 
     #[test]
@@ -764,8 +274,7 @@ mod tests {
         ignore = "SQLCipher rekey overflows the Windows test stack in CI"
     )]
     fn rekey_with_raw_key() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".test_rekey_rawkey");
-        let _ = fs::remove_dir_all(&path);
+        let dir = TestDir::new(".test_rekey_rawkey");
 
         let old_params = "password=raw_old salt=raw_old_salt_value"
             .parse::<ConnectionParams>()
@@ -778,19 +287,17 @@ mod tests {
 
         {
             let mut keyring =
-                SqlCipherKeyring::with_params(&old_params, Some(path.clone())).unwrap();
+                SqlCipherKeyring::with_params(&old_params, dir.keyring_dir()).unwrap();
             keyring.set_secret("raw", b"raw_key_data").unwrap();
             keyring.rekey(&new_params).unwrap();
         }
 
         {
             let mut keyring =
-                SqlCipherKeyring::with_params(&new_params, Some(path.clone())).unwrap();
+                SqlCipherKeyring::with_params(&new_params, dir.keyring_dir()).unwrap();
             assert_eq!(keyring.get_secret("raw").unwrap().0, b"raw_key_data");
         }
 
-        assert!(SqlCipherKeyring::with_params(&old_params, Some(path.clone())).is_err());
-
-        let _ = fs::remove_dir_all(&path);
+        assert!(SqlCipherKeyring::with_params(&old_params, dir.keyring_dir()).is_err());
     }
 }

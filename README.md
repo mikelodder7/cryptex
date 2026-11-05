@@ -44,6 +44,12 @@ Currently Mac OS X offers support for a [CLI tool](https://www.netmeister.org/bl
 *Cryptex* also supports file-backed keyrings instead of the OS keyring. The `file` feature enables
 the [SQLCipher](https://www.zetetic.net/sqlcipher/) backend, and the `encrypted-vfs` feature enables
 a bundled SQLite VFS encrypted with ChaCha20-Poly1305 by default or AES-256-GCM when requested.
+The `turso` feature stores secrets in a [Turso](https://github.com/tursodatabase/turso) database
+using Turso's native page encryption (AEGIS-256 by default or AES-256-GCM), and the
+`turso-encrypted-io` feature runs Turso over a custom IO layer that applies the same
+ChaCha20-Poly1305 / AES-256-GCM page encryption as `encrypted-vfs`. Both Turso backends use
+`~/.cryptex/keyring-turso.db3` and depend on a pinned Turso pre-release whose encryption is
+experimental upstream.
 You can check if SQLCipher is enabled by running `allows_file()`.
 
 The file-backed keyrings use two inputs to create the encryption key: a user-selected password and
@@ -70,10 +76,17 @@ The values can be overridden in the connection string:
 password=<password> salt=<salt value> memory=<integer> threads=<integer> parallel=<integer>
 ```
 
-For the encrypted VFS backend, the cipher can also be selected:
+For the encrypted VFS and Turso encrypted IO backends, the cipher can also be selected:
 
 ```text
 password=<password> salt=<salt value> cipher=chacha20poly1305
+password=<password> salt=<salt value> cipher=aes256gcm
+```
+
+For the native Turso backend:
+
+```text
+password=<password> salt=<salt value> cipher=aegis256
 password=<password> salt=<salt value> cipher=aes256gcm
 ```
 

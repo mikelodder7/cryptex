@@ -17,6 +17,22 @@ mod keyring;
 #[cfg(feature = "encrypted-vfs")]
 #[cfg_attr(docsrs, doc(cfg(feature = "encrypted-vfs")))]
 pub use keyring::encrypted_vfs;
+#[cfg(any(
+    feature = "file",
+    feature = "encrypted-vfs",
+    feature = "turso",
+    feature = "turso-encrypted-io"
+))]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(any(
+        feature = "file",
+        feature = "encrypted-vfs",
+        feature = "turso",
+        feature = "turso-encrypted-io"
+    )))
+)]
+pub use keyring::file_common;
 #[cfg(any(feature = "yubihsm-usb", feature = "yubihsm-http"))]
 #[cfg_attr(
     docsrs,
@@ -35,6 +51,12 @@ pub use keyring::macos;
 #[cfg(feature = "file")]
 #[cfg_attr(docsrs, doc(cfg(feature = "file")))]
 pub use keyring::sqlcipher;
+#[cfg(feature = "turso")]
+#[cfg_attr(docsrs, doc(cfg(feature = "turso")))]
+pub use keyring::turso;
+#[cfg(feature = "turso-encrypted-io")]
+#[cfg_attr(docsrs, doc(cfg(feature = "turso-encrypted-io")))]
+pub use keyring::turso_encrypted_io;
 #[cfg(all(target_os = "windows", feature = "windows-credentials"))]
 #[cfg_attr(
     docsrs,

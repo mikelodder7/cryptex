@@ -7,14 +7,31 @@ mod keyringsecret;
 
 #[cfg(feature = "encrypted-vfs")]
 pub mod encrypted_vfs;
+#[cfg(any(
+    feature = "file",
+    feature = "encrypted-vfs",
+    feature = "turso",
+    feature = "turso-encrypted-io"
+))]
+pub mod file_common;
 #[cfg(any(feature = "yubihsm-usb", feature = "yubihsm-http"))]
 pub mod kms;
 #[cfg(all(target_os = "linux", feature = "linux-secret-service"))]
 pub mod linux;
 #[cfg(all(target_os = "macos", feature = "macos-keychain"))]
 pub mod macos;
+#[cfg(any(feature = "encrypted-vfs", feature = "turso-encrypted-io"))]
+mod page_cipher;
 #[cfg(feature = "file")]
 pub mod sqlcipher;
+#[cfg(any(feature = "file", feature = "encrypted-vfs"))]
+mod sqlite_common;
+#[cfg(feature = "turso")]
+pub mod turso;
+#[cfg(any(feature = "turso", feature = "turso-encrypted-io"))]
+mod turso_common;
+#[cfg(feature = "turso-encrypted-io")]
+pub mod turso_encrypted_io;
 #[cfg(all(target_os = "windows", feature = "windows-credentials"))]
 pub mod windows;
 #[cfg(any(feature = "yubihsm-usb", feature = "yubihsm-http"))]
@@ -82,6 +99,8 @@ pub fn get_os_keyring(service: &str) -> Result<OsKeyRing<'_>> {
     all(target_os = "linux", feature = "linux-secret-service"),
     feature = "file",
     feature = "encrypted-vfs",
+    feature = "turso",
+    feature = "turso-encrypted-io",
     feature = "yubihsm-usb",
     feature = "yubihsm-http",
 )))]
@@ -120,37 +139,85 @@ pub const fn allows_file() -> bool {
 }
 
 /// Default Argon2 memory cost, in KiB blocks, for file-backed keyrings.
-#[cfg(all(not(test), any(feature = "file", feature = "encrypted-vfs")))]
+#[cfg(all(
+    not(test),
+    any(
+        feature = "file",
+        feature = "encrypted-vfs",
+        feature = "turso",
+        feature = "turso-encrypted-io"
+    )
+))]
 pub const fn default_memory_cost() -> u32 {
     32 * 1024
 }
 
 /// Default Argon2 memory cost, in KiB blocks, for file-backed keyring tests.
-#[cfg(all(test, any(feature = "file", feature = "encrypted-vfs")))]
+#[cfg(all(
+    test,
+    any(
+        feature = "file",
+        feature = "encrypted-vfs",
+        feature = "turso",
+        feature = "turso-encrypted-io"
+    )
+))]
 pub const fn default_memory_cost() -> u32 {
     argon2::Params::DEFAULT_M_COST
 }
 
 /// Default Argon2 thread/time cost for file-backed keyrings.
-#[cfg(all(not(test), any(feature = "file", feature = "encrypted-vfs")))]
+#[cfg(all(
+    not(test),
+    any(
+        feature = "file",
+        feature = "encrypted-vfs",
+        feature = "turso",
+        feature = "turso-encrypted-io"
+    )
+))]
 pub const fn default_threads() -> u32 {
     3
 }
 
 /// Default Argon2 thread/time cost for file-backed keyring tests.
-#[cfg(all(test, any(feature = "file", feature = "encrypted-vfs")))]
+#[cfg(all(
+    test,
+    any(
+        feature = "file",
+        feature = "encrypted-vfs",
+        feature = "turso",
+        feature = "turso-encrypted-io"
+    )
+))]
 pub const fn default_threads() -> u32 {
     argon2::Params::DEFAULT_T_COST
 }
 
 /// Default Argon2 parallelism cost for file-backed keyrings.
-#[cfg(all(not(test), any(feature = "file", feature = "encrypted-vfs")))]
+#[cfg(all(
+    not(test),
+    any(
+        feature = "file",
+        feature = "encrypted-vfs",
+        feature = "turso",
+        feature = "turso-encrypted-io"
+    )
+))]
 pub const fn default_parallel() -> u32 {
     2
 }
 
 /// Default Argon2 parallelism cost for file-backed keyring tests.
-#[cfg(all(test, any(feature = "file", feature = "encrypted-vfs")))]
+#[cfg(all(
+    test,
+    any(
+        feature = "file",
+        feature = "encrypted-vfs",
+        feature = "turso",
+        feature = "turso-encrypted-io"
+    )
+))]
 pub const fn default_parallel() -> u32 {
     argon2::Params::DEFAULT_P_COST
 }
@@ -203,7 +270,15 @@ pub trait ListKeyRing {
     fn list_secrets() -> Result<Vec<BTreeMap<String, String>>>;
 }
 
-#[cfg(all(test, any(feature = "file", feature = "encrypted-vfs")))]
+#[cfg(all(
+    test,
+    any(
+        feature = "file",
+        feature = "encrypted-vfs",
+        feature = "turso",
+        feature = "turso-encrypted-io"
+    )
+))]
 mod tests {
     use super::*;
 

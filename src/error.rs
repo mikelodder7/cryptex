@@ -13,14 +13,25 @@ use secret_service::Error as LinuxOsError;
 #[cfg(all(target_os = "macos", feature = "macos-keychain"))]
 use security_framework::base::Error as MacOsError;
 
+/// Errors returned by every keyring backend.
 #[derive(Clone, Eq, PartialEq)]
 pub enum KeyRingError {
+    /// No secret is stored under the requested id.
     ItemNotFound,
-    AccessDenied { msg: String },
-    GeneralError { msg: String },
+    /// The keyring refused access, e.g. a wrong key or a locked keyring.
+    AccessDenied {
+        /// Details of the refusal.
+        msg: String,
+    },
+    /// Any other failure.
+    GeneralError {
+        /// Description of the failure.
+        msg: String,
+    },
 }
 
 impl KeyRingError {
+    /// A human-readable description of the error.
     pub fn as_str(&self) -> String {
         match *self {
             Self::ItemNotFound => {
@@ -51,6 +62,14 @@ impl From<&str> for KeyRingError {
 }
 
 impl Error for KeyRingError {}
+
+impl From<std::io::Error> for KeyRingError {
+    fn from(value: std::io::Error) -> Self {
+        KeyRingError::GeneralError {
+            msg: value.to_string(),
+        }
+    }
+}
 
 #[cfg(all(target_os = "macos", feature = "macos-keychain"))]
 #[cfg_attr(docsrs, doc(cfg(all(target_os = "macos", feature = "macos-keychain"))))]
@@ -98,6 +117,19 @@ impl From<LinuxOsError> for KeyRingError {
 #[cfg_attr(docsrs, doc(cfg(any(feature = "file", feature = "encrypted-vfs"))))]
 impl From<rusqlite::Error> for KeyRingError {
     fn from(value: rusqlite::Error) -> Self {
+        KeyRingError::GeneralError {
+            msg: value.to_string(),
+        }
+    }
+}
+
+#[cfg(any(feature = "turso", feature = "turso-encrypted-io"))]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(any(feature = "turso", feature = "turso-encrypted-io")))
+)]
+impl From<::turso::Error> for KeyRingError {
+    fn from(value: ::turso::Error) -> Self {
         KeyRingError::GeneralError {
             msg: value.to_string(),
         }

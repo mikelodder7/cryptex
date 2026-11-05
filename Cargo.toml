@@ -32,6 +32,8 @@ name = "cryptex"
 default = ["linux-secret-service", "macos-keychain", "windows-credentials"]
 file = ["dep:argon2", "dep:dirs", "dep:rusqlite", "rusqlite/bundled-sqlcipher-vendored-openssl"]
 encrypted-vfs = ["dep:argon2", "dep:dirs", "dep:rusqlite", "rusqlite/bundled", "dep:chacha20poly1305", "dep:aes-gcm", "dep:sqlite-plugin", "dep:getrandom"]
+turso = ["dep:argon2", "dep:dirs", "dep:turso", "dep:bindgen"]
+turso-encrypted-io = ["dep:argon2", "dep:dirs", "dep:turso", "dep:bindgen", "dep:chacha20poly1305", "dep:aes-gcm", "dep:getrandom"]
 linux-secret-service = ["secret-service", "uzers"]
 macos-keychain = ["security-framework", "security-framework-sys", "core-foundation", "core-foundation-sys", "uzers"]
 windows-credentials = ["windows"]
@@ -55,6 +57,8 @@ serde = { version = "1", optional = true }
 sha2 = { version = "0.11", optional = true }
 sqlite-plugin = { version = "0.10", optional = true }
 subtle = "2"
+# Pre-release pinned exactly: page encryption and custom IO are only exposed here.
+turso = { version = "=0.9.0-pre.1", default-features = false, optional = true }
 whoami = "2.1.2"
 yubihsm = { version = "0.42", default-features = false, optional = true }
 zeroize = { version = "1.9.0", features = ["zeroize_derive"] }
@@ -85,3 +89,9 @@ windows = { version = "0.62", features = [
     "Win32_Security_Credentials",
     "Win32_Security_Cryptography",
 ], optional = true }
+
+[build-dependencies]
+# Never compiled (no build.rs); only aligns feature resolution. turso_sdk_kit's
+# bindgen 0.69 enables clang-sys `runtime`, which breaks sqlite-plugin's bindgen
+# 0.72 unless it also loads libclang at runtime. Drop once upstream aligns.
+bindgen = { version = "0.72", default-features = false, features = ["runtime"], optional = true }
