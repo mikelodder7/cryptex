@@ -9,12 +9,14 @@
 
 use super::*;
 use ::turso::{Builder, Connection, Database};
-use std::fs::{self, File};
+use std::fs;
+use std::fs::File;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::pin;
 use std::sync::Arc;
 use std::task::{Context, Poll, Wake, Waker};
+#[cfg(not(target_family = "wasm"))]
 use std::thread::{self, Thread};
 
 use super::file_common::{
@@ -29,8 +31,10 @@ use zeroize::Zeroizing;
 /// `keyring.db3` so the backends never try to open each other's files.
 pub(crate) const KEYRING_FILE: &str = "keyring-turso.db3";
 
+#[cfg(not(target_family = "wasm"))]
 struct ThreadWaker(Thread);
 
+#[cfg(not(target_family = "wasm"))]
 impl Wake for ThreadWaker {
     fn wake(self: Arc<Self>) {
         self.0.unpark();
@@ -38,38 +42,97 @@ impl Wake for ThreadWaker {
 }
 
 /// Drive `fut` to completion on the current thread.
-fn block_on<F: Future>(fut: F) -> F::Output {
+///
+/// Turso's futures only return `Pending` when the IO is asynchronous. Native
+/// builds can block, so they park the thread until woken. Wasm threads cannot
+/// block, so a wasm build polls a bounded number of times and fails instead of
+/// spinning forever when an IO backend never completes in place.
+#[cfg(not(target_family = "wasm"))]
+pub(crate) fn block_on<F, T, E>(fut: F) -> Result<T>
+where
+    F: Future<Output = std::result::Result<T, E>>,
+    E: Into<KeyRingError>,
+{
     let mut fut = pin!(fut);
     let waker = Waker::from(Arc::new(ThreadWaker(thread::current())));
     let mut cx = Context::from_waker(&waker);
     loop {
         if let Poll::Ready(out) = fut.as_mut().poll(&mut cx) {
-            return out;
+            return out.map_err(Into::into);
         }
         thread::park();
     }
 }
 
+/// How many times a pending future is re-polled before giving up on wasm.
+#[cfg(target_family = "wasm")]
+const MAX_WASM_POLLS: usize = 1_000_000;
+
+#[cfg(target_family = "wasm")]
+struct SpinWaker;
+
+#[cfg(target_family = "wasm")]
+impl Wake for SpinWaker {
+    fn wake(self: Arc<Self>) {}
+}
+
+#[cfg(target_family = "wasm")]
+fn block_on<F, T, E>(fut: F) -> Result<T>
+where
+    F: Future<Output = std::result::Result<T, E>>,
+    E: Into<KeyRingError>,
+{
+    let mut fut = pin!(fut);
+    let waker = Waker::from(Arc::new(SpinWaker));
+    let mut cx = Context::from_waker(&waker);
+    for _ in 0..MAX_WASM_POLLS {
+        if let Poll::Ready(out) = fut.as_mut().poll(&mut cx) {
+            return out.map_err(Into::into);
+        }
+    }
+    Err(KeyRingError::GeneralError {
+        msg: "turso did not complete synchronously: the IO backend must complete \
+              reads in place on wasm"
+            .to_string(),
+    })
+}
+
 /// An open Turso database holding the `secrets` table.
 struct TursoStore {
     conn: Connection,
-    _db: Database,
+    /// Kept alive for as long as the store; `None` when the caller supplied
+    /// the connection and owns the database handle themselves.
+    _db: Option<Database>,
 }
 
 impl TursoStore {
+    /// Create the keyring's tables on an open connection, verifying the key.
+    async fn prepare(conn: Connection, db: Option<Database>) -> Result<Self> {
+        let mut rows = conn
+            .query(VERIFY_KEY_SQL, ())
+            .await
+            .map_err(|_| invalid_key())?;
+        rows.next().await.map_err(|_| invalid_key())?;
+        drop(rows);
+        conn.execute(CREATE_SECRETS_SQL, ()).await?;
+        Ok(Self { conn, _db: db })
+    }
+
+    /// Open the database described by `builder` and create the tables.
     fn open(builder: Builder) -> Result<Self> {
-        block_on(async {
+        block_on::<_, Self, KeyRingError>(async {
             let db = builder.build().await?;
             let conn = db.connect()?;
-            let mut rows = conn
-                .query(VERIFY_KEY_SQL, ())
-                .await
-                .map_err(|_| invalid_key())?;
-            rows.next().await.map_err(|_| invalid_key())?;
-            drop(rows);
-            conn.execute(CREATE_SECRETS_SQL, ()).await?;
-            Ok(Self { conn, _db: db })
+            Self::prepare(conn, Some(db)).await
         })
+    }
+
+    /// Adopt an already-open connection.
+    ///
+    /// The keyring creates and owns its `secrets` table; everything else on
+    /// the connection is left alone, so application tables can share it.
+    fn adopt(conn: Connection) -> Result<Self> {
+        block_on(Self::prepare(conn, None))
     }
 
     fn get(&self, id: &str) -> Result<KeyRingSecret> {
@@ -96,7 +159,7 @@ impl TursoStore {
 
     /// Copy every secret into `dst` inside a single transaction.
     fn copy_into(&self, dst: &TursoStore) -> Result<()> {
-        block_on(async {
+        block_on::<_, (), KeyRingError>(async {
             let mut rows = self.conn.query("SELECT id, value FROM secrets", ()).await?;
             dst.conn.execute("BEGIN", ()).await?;
             while let Some(row) = rows.next().await? {
@@ -113,7 +176,7 @@ impl TursoStore {
 
     /// Flush the WAL into the main database file and empty the WAL.
     fn checkpoint(&self) -> Result<()> {
-        block_on(async {
+        block_on::<_, (), KeyRingError>(async {
             let mut rows = self
                 .conn
                 .query("PRAGMA wal_checkpoint(TRUNCATE)", ())
@@ -130,10 +193,21 @@ impl TursoStore {
 /// carrying their encryption configuration.
 pub(crate) struct TursoFile {
     store: TursoStore,
-    db_path: PathBuf,
-    /// Exclusive advisory lock on a sidecar file, held for the keyring's
-    /// lifetime so `rekey`'s rename never races another opener.
-    _lock: File,
+    storage: Storage,
+}
+
+/// Where a keyring's database lives, and who is responsible for it.
+enum Storage {
+    /// cryptex opened the file itself and holds the single-opener lock.
+    File {
+        db_path: PathBuf,
+        /// Exclusive advisory lock on a sidecar file, held for the keyring's
+        /// lifetime so `rekey`'s rename never races another opener.
+        _lock: File,
+    },
+    /// The caller supplied the storage: a connection, or a custom IO backend
+    /// such as OPFS. The caller owns single-writer access.
+    Caller,
 }
 
 impl TursoFile {
@@ -147,15 +221,39 @@ impl TursoFile {
         let store = TursoStore::open(builder(path_str(&db_path)?))?;
         Ok(Self {
             store,
-            db_path,
-            _lock: lock,
+            storage: Storage::File {
+                db_path,
+                _lock: lock,
+            },
         })
     }
 
-    /// Path of the main database file.
+    /// Open through a caller-supplied [`Builder`], e.g. one carrying a custom
+    /// Turso `IO`. No path is resolved and no lock file is created: the caller
+    /// owns the storage.
+    pub(crate) fn open_with(builder: Builder) -> Result<Self> {
+        Ok(Self {
+            store: TursoStore::open(builder)?,
+            storage: Storage::Caller,
+        })
+    }
+
+    /// Adopt an already-open connection. The keyring creates and owns its
+    /// `secrets` table and leaves every other table alone.
+    pub(crate) fn adopt(conn: Connection) -> Result<Self> {
+        Ok(Self {
+            store: TursoStore::adopt(conn)?,
+            storage: Storage::Caller,
+        })
+    }
+
+    /// Path of the main database file, when cryptex opened it itself.
     #[cfg(feature = "turso")]
-    pub(crate) fn db_path(&self) -> &Path {
-        &self.db_path
+    pub(crate) fn db_path(&self) -> Option<&Path> {
+        match &self.storage {
+            Storage::File { db_path, .. } => Some(db_path),
+            Storage::Caller => None,
+        }
     }
 
     /// Re-encrypt the keyring under the configuration produced by `builder`.
@@ -163,11 +261,22 @@ impl TursoFile {
     /// Secrets are copied into a temporary database opened with the new
     /// configuration, which then atomically replaces the original. The
     /// original is untouched if anything fails before the rename.
+    ///
+    /// Only a keyring that cryptex opened from a path can be rekeyed; a
+    /// keyring adopted from a caller's connection or IO must be rekeyed by
+    /// the caller, who owns the storage.
     pub(crate) fn rekey<B>(self, builder: B) -> Result<Self>
     where
         B: Fn(&str) -> Builder,
     {
-        let tmp_path = self.db_path.with_extension("cryptex-rekey-tmp");
+        let Storage::File { db_path, _lock } = self.storage else {
+            return Err(KeyRingError::GeneralError {
+                msg: "rekey is only available for a keyring cryptex opened from a path; \
+                      copy the secrets into a new keyring instead"
+                    .to_string(),
+            });
+        };
+        let tmp_path = db_path.with_extension("cryptex-rekey-tmp");
         remove_db_files(&tmp_path)?;
 
         let copied = TursoStore::open(builder(path_str(&tmp_path)?)).and_then(|tmp| {
@@ -180,12 +289,7 @@ impl TursoFile {
         }
         self.store.checkpoint()?;
 
-        let Self {
-            store,
-            db_path,
-            _lock,
-        } = self;
-        drop(store);
+        drop(self.store);
         remove_file_if_exists(&sibling_path(&tmp_path, "-wal"))?;
         remove_file_if_exists(&sibling_path(&db_path, "-wal"))?;
         fs::rename(&tmp_path, &db_path).map_err(|e| KeyRingError::GeneralError {
@@ -195,8 +299,7 @@ impl TursoFile {
         let store = TursoStore::open(builder(path_str(&db_path)?))?;
         Ok(Self {
             store,
-            db_path,
-            _lock,
+            storage: Storage::File { db_path, _lock },
         })
     }
 }
@@ -243,15 +346,15 @@ mod tests {
     #[test]
     fn block_on_drives_pending_future() {
         let mut polled = false;
-        let fut = std::future::poll_fn(|cx| {
+        let fut = std::future::poll_fn::<crate::Result<i32>, _>(|cx| {
             if polled {
-                std::task::Poll::Ready(7)
+                std::task::Poll::Ready(Ok(7))
             } else {
                 polled = true;
                 cx.waker().wake_by_ref();
                 std::task::Poll::Pending
             }
         });
-        assert_eq!(block_on(fut), 7);
+        assert_eq!(block_on(fut).unwrap(), 7);
     }
 }

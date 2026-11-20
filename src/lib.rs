@@ -20,6 +20,7 @@ pub use keyring::encrypted_vfs;
 #[cfg(any(
     feature = "file",
     feature = "encrypted-vfs",
+    feature = "memory",
     feature = "turso",
     feature = "turso-encrypted-io"
 ))]
@@ -48,6 +49,9 @@ pub use keyring::linux;
 #[cfg(all(target_os = "macos", feature = "macos-keychain"))]
 #[cfg_attr(docsrs, doc(cfg(all(target_os = "macos", feature = "macos-keychain"))))]
 pub use keyring::macos;
+#[cfg(feature = "memory")]
+#[cfg_attr(docsrs, doc(cfg(feature = "memory")))]
+pub use keyring::memory;
 #[cfg(feature = "file")]
 #[cfg_attr(docsrs, doc(cfg(feature = "file")))]
 pub use keyring::sqlcipher;

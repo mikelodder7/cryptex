@@ -25,7 +25,7 @@ use super::file_common::{self, derive_key_32, file_keyring, private_open_options
 use super::page_cipher::{self, ActiveCipher};
 use super::turso_common::TursoFile;
 
-pub use super::page_cipher::CipherAlgorithm;
+pub use super::cipher::CipherAlgorithm;
 
 /// Connection parameters for [`TursoEncryptedIoKeyring`].
 ///

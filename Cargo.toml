@@ -15,8 +15,20 @@ repository = "https://github.com/mikelodder7/cryptex"
 readme = "README.md"
 version = "2.4.0"
 
+# `all-features` is not used: the browser-only features (web-storage,
+# indexeddb, opfs, js) are rejected on non-wasm targets on purpose.
 [package.metadata.docs.rs]
-all-features = true
+no-default-features = true
+features = [
+    "serde",
+    "file",
+    "encrypted-vfs",
+    "memory",
+    "turso",
+    "turso-encrypted-io",
+    "yubihsm-usb",
+    "yubihsm-http",
+]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [package.metadata.cargo-udeps.ignore]
@@ -31,6 +43,18 @@ name = "cryptex"
 [features]
 default = ["linux-secret-service", "macos-keychain", "windows-credentials"]
 file = ["dep:argon2", "dep:dirs", "dep:rusqlite", "rusqlite/bundled-sqlcipher-vendored-openssl"]
+memory = ["dep:argon2", "dep:chacha20poly1305", "dep:aes-gcm", "dep:getrandom"]
+web-storage = ["memory", "dep:web-sys", "dep:wasm-bindgen"]
+indexeddb = ["dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys"]
+opfs = ["dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys"]
+js = [
+    "memory",
+    "indexeddb",
+    "dep:web-sys",
+    "dep:wasm-bindgen",
+    "dep:wasm-bindgen-futures",
+    "dep:js-sys",
+]
 encrypted-vfs = ["dep:argon2", "dep:dirs", "dep:rusqlite", "rusqlite/bundled", "dep:chacha20poly1305", "dep:aes-gcm", "dep:sqlite-plugin", "dep:getrandom"]
 turso = ["dep:argon2", "dep:dirs", "dep:turso", "dep:bindgen"]
 turso-encrypted-io = ["dep:argon2", "dep:dirs", "dep:turso", "dep:bindgen", "dep:chacha20poly1305", "dep:aes-gcm", "dep:getrandom"]
@@ -51,7 +75,6 @@ dirs = { version = "6.0", optional = true }
 getrandom = { version = "0.4.3", optional = true }
 hex = "0.4"
 postcard = { version = "1", default-features = false, features = ["use-std"], optional = true }
-rpassword = "7.5.4"
 rusqlite = { version = "0.40.1", default-features = false, optional = true }
 serde = { version = "1", optional = true }
 sha2 = { version = "0.11", optional = true }
@@ -65,6 +88,49 @@ zeroize = { version = "1.9.0", features = ["zeroize_derive"] }
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+rpassword = "7.5.4"
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { version = "0.4.3", features = ["wasm_js"], optional = true }
+js-sys = { version = "0.3", optional = true }
+wasm-bindgen = { version = "0.2.130", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+web-sys = { version = "0.3", optional = true, features = [
+    "Window",
+    "Storage",
+    "Performance",
+    "WorkerGlobalScope",
+    "WorkerNavigator",
+    "StorageManager",
+    "LockManager",
+    "LockManagerSnapshot",
+    "Lock",
+    "IdbFactory",
+    "IdbDatabase",
+    "IdbOpenDbRequest",
+    "IdbObjectStore",
+    "IdbTransaction",
+    "IdbTransactionMode",
+    "IdbRequest",
+    "FileSystemDirectoryHandle",
+    "FileSystemFileHandle",
+    "FileSystemGetFileOptions",
+    "FileSystemSyncAccessHandle",
+    "FileSystemReadWriteOptions",
+] }
+
+# Turso's native page encryption on wasm must use its pure-Rust ciphers;
+# the native `aegis` build links C.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies.turso]
+version = "=0.9.0-pre.1"
+default-features = false
+features = ["pure-rust-crypto"]
+optional = true
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dev-dependencies]
+wasm-bindgen-test = "0.3"
 
 [[bench]]
 name = "cipher_bench"

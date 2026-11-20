@@ -11,6 +11,7 @@
 use super::*;
 use ::turso::{Builder, EncryptionOpts};
 use std::path::PathBuf;
+use std::sync::Arc;
 use zeroize::{Zeroize, Zeroizing};
 
 use super::file_common::{self, CipherParam, derive_key_32, file_keyring, secure_file};
@@ -62,11 +63,29 @@ impl CipherParam for TursoCipher {
 /// ```
 pub type ConnectionParams = file_common::ConnectionParams<TursoCipher>;
 
+/// Turso's builder, re-exported so callers construct matching types.
+pub use ::turso::Builder as TursoBuilder;
+/// The Turso connection type a keyring can adopt.
+///
+/// Use the `turso` crate cryptex was built against (the same version as
+/// [`Builder`]), or a type mismatch will result.
+pub use ::turso::Connection;
+/// Turso's low-level crate, for implementing a custom `IO` such as OPFS.
+pub use ::turso::core;
+
 /// A keyring stored in a Turso database encrypted with Turso's native page
 /// encryption. The default file is `~/.cryptex/keyring-turso.db3`.
 ///
 /// Turso keeps its own copy of the hex-encoded key for the life of the
 /// database; cryptex zeroizes only the copies it owns.
+///
+/// Three ways to get one:
+/// - [`with_params`](Self::with_params) opens the file itself, as before.
+/// - [`from_connection`](Self::from_connection) adopts a connection the caller
+///   already opened, so key storage and application tables can share one
+///   database and one key.
+/// - [`with_io`](Self::with_io) opens through a caller-supplied Turso `IO`,
+///   such as the Origin Private File System in a browser worker.
 pub struct TursoKeyring {
     file: TursoFile,
 }
@@ -77,8 +96,55 @@ impl TursoKeyring {
     /// Open (or create) the keyring in `path` (default `~/.cryptex`).
     pub fn with_params(connection: &ConnectionParams, path: Option<PathBuf>) -> Result<Self> {
         let file = TursoFile::open(path, builder(connection)?)?;
-        secure_file(file.db_path())?;
+        if let Some(db_path) = file.db_path() {
+            secure_file(db_path)?;
+        }
         Ok(Self { file })
+    }
+
+    /// Adopt an already-open Turso connection.
+    ///
+    /// The keyring creates and owns its `secrets` table and uses the
+    /// connection as given, so an application can keep its own tables in the
+    /// same database and share one key derivation. Nothing about the
+    /// connection is reconfigured: encryption, IO and the clock are the
+    /// caller's.
+    ///
+    /// The caller is responsible for opening the database with the right key
+    /// and, in a browser, for holding the single-writer storage handle.
+    ///
+    /// [`rekey`](Self::rekey) is not available on an adopted keyring because
+    /// cryptex does not own the storage; copy the secrets into a new keyring
+    /// instead.
+    ///
+    /// ```no_run
+    /// # use cryptex::turso::{TursoKeyring, TursoBuilder};
+    /// # async fn example(conn: cryptex::turso::Connection) -> Result<(), Box<dyn std::error::Error>> {
+    /// // The caller opened the database, e.g. with its own IO and encryption.
+    /// let mut keyring = TursoKeyring::from_connection(conn)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn from_connection(conn: Connection) -> Result<Self> {
+        Ok(Self {
+            file: TursoFile::adopt(conn)?,
+        })
+    }
+
+    /// Open (or create) the keyring through a caller-supplied Turso `IO`.
+    ///
+    /// `io` supplies every page: for example an OPFS-backed `IO` in a browser
+    /// worker. `path` is the database path passed to that IO. The key is
+    /// derived from `params` and applied with Turso's native page encryption,
+    /// exactly as [`with_params`](Self::with_params) does.
+    ///
+    /// No lock file is created and [`rekey`](Self::rekey) is unavailable; the
+    /// caller owns single-writer access, which for OPFS means holding the one
+    /// sync access handle for the database.
+    pub fn with_io(io: Arc<dyn core::IO>, path: &str, params: &ConnectionParams) -> Result<Self> {
+        Ok(Self {
+            file: TursoFile::open_with(builder(params)?(path).with_io_impl(io))?,
+        })
     }
 
     /// Re-encrypt the keyring with a new key (and optionally a different cipher).
@@ -88,7 +154,9 @@ impl TursoKeyring {
     /// with the old parameters.
     pub fn rekey(self, new_params: &ConnectionParams) -> Result<Self> {
         let file = self.file.rekey(builder(new_params)?)?;
-        secure_file(file.db_path())?;
+        if let Some(db_path) = file.db_path() {
+            secure_file(db_path)?;
+        }
         Ok(Self { file })
     }
 }
@@ -113,7 +181,9 @@ mod tests {
     use crate::KeyRing;
     use crate::error::KeyRingError;
     use crate::file_common::test_support::TestDir;
+    use crate::keyring::turso_common::block_on;
     use std::fs;
+    use std::sync::Arc;
 
     fn params(s: &str) -> ConnectionParams {
         s.parse().unwrap()
@@ -206,5 +276,98 @@ mod tests {
         }
 
         assert!(TursoKeyring::with_params(&old_params, dir.keyring_dir()).is_err());
+    }
+
+    /// A connection opened by the caller, as a browser worker would.
+    fn caller_connection(
+        path: std::path::PathBuf,
+        params: &ConnectionParams,
+    ) -> ::turso::Connection {
+        let hexkey = hex::encode(*crate::file_common::derive_key_32(params).unwrap());
+        let db = block_on::<_, _, KeyRingError>(async {
+            ::turso::Builder::new_local(path.to_str().unwrap())
+                .experimental_encryption(true)
+                .with_encryption(::turso::EncryptionOpts {
+                    cipher: params.cipher.as_turso_name().to_string(),
+                    hexkey,
+                })
+                .build()
+                .await
+                .map_err(|e| KeyRingError::GeneralError { msg: e.to_string() })
+        })
+        .unwrap();
+        db.connect().unwrap()
+    }
+
+    #[test]
+    fn adopts_an_existing_connection() {
+        let dir = TestDir::new(".test-turso-from-connection");
+        let p = params("password=adopt_pass salt=1qaz2wsx3edc4rfv5tgb");
+        fs::create_dir_all(&*dir).unwrap();
+        let conn = caller_connection(dir.join("shared.db3"), &p);
+
+        // The application owns its own table on the same connection.
+        block_on(conn.execute("CREATE TABLE audit (event TEXT NOT NULL)", ())).unwrap();
+
+        {
+            let mut kr = TursoKeyring::from_connection(conn.clone()).unwrap();
+            kr.set_secret("k1", b"value1").unwrap();
+            kr.set_secret("k2", b"value2").unwrap();
+            assert_eq!(kr.get_secret("k1").unwrap().0, b"value1");
+            kr.delete_secret("k2").unwrap();
+            assert!(matches!(
+                kr.get_secret("k2"),
+                Err(KeyRingError::ItemNotFound)
+            ));
+        }
+
+        // Reopening through another connection to the same file sees the data,
+        // and the application table survived.
+        let mut kr =
+            TursoKeyring::from_connection(caller_connection(dir.join("shared.db3"), &p)).unwrap();
+        assert_eq!(kr.get_secret("k1").unwrap().0, b"value1");
+
+        let mut rows = block_on(conn.query(
+            "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
+            (),
+        ))
+        .unwrap();
+        let mut tables = Vec::new();
+        while let Some(row) = block_on(rows.next()).unwrap() {
+            tables.push(row.get::<String>(0).unwrap());
+        }
+        assert_eq!(tables, vec!["audit", "secrets"]);
+    }
+
+    #[test]
+    fn adopted_keyring_cannot_rekey() {
+        let dir = TestDir::new(".test-turso-adopt-rekey");
+        let p = params("password=adopt_pass salt=1qaz2wsx3edc4rfv5tgb");
+        fs::create_dir_all(&*dir).unwrap();
+        let kr =
+            TursoKeyring::from_connection(caller_connection(dir.join("shared.db3"), &p)).unwrap();
+        assert!(kr.rekey(&p).is_err());
+    }
+
+    #[test]
+    fn opens_through_a_custom_io() {
+        // A caller-supplied IO stands in for OPFS in a browser worker.
+        let io = Arc::new(::turso::core::MemoryIO::new());
+        let p = params("password=io_pass salt=1qaz2wsx3edc4rfv5tgb");
+        let db_name = "keyring.db3";
+
+        {
+            let mut kr = TursoKeyring::with_io(io.clone(), db_name, &p).unwrap();
+            kr.set_secret("k1", b"value1").unwrap();
+        }
+
+        {
+            let mut kr = TursoKeyring::with_io(io.clone(), db_name, &p).unwrap();
+            assert_eq!(kr.get_secret("k1").unwrap().0, b"value1");
+        }
+
+        // A different key on the same pages is refused.
+        let wrong = params("password=wrong_pass salt=1qaz2wsx3edc4rfv5tgb");
+        assert!(TursoKeyring::with_io(io, db_name, &wrong).is_err());
     }
 }

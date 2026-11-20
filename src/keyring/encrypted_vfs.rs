@@ -20,7 +20,7 @@ use super::page_cipher::{ActiveCipher, LOGICAL_PAGE_SIZE, logical_size, truncate
 use super::sqlite_common::{KEYRING_FILE, init_schema, lock_connection};
 use crate::error::KeyRingError;
 
-pub use super::page_cipher::CipherAlgorithm;
+pub use super::cipher::CipherAlgorithm;
 
 /// Connection parameters for [`EncryptedVfsKeyring`].
 ///
