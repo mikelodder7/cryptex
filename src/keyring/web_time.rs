@@ -7,7 +7,7 @@
 //! Turso's own clock calls `Instant::now`, which panics on
 //! `wasm32-unknown-unknown`: the platform has no monotonic clock behind it.
 //! `performance.now()` is the closest equivalent and, unlike `Date.now()`,
-//! only moves forward.
+//! only moves forward. WASI builds have `std::time` and use it.
 
 use ::turso::core::{Clock, MonotonicInstant, WallClockInstant};
 
@@ -27,7 +27,7 @@ impl Clock for WebClock {
 /// Milliseconds since the time origin, from `performance.now()`.
 ///
 /// A worker has no `window`, so the value is read off the global object.
-#[cfg(target_family = "wasm")]
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
 fn performance_millis() -> Option<f64> {
     use wasm_bindgen::{JsCast, JsValue};
 
@@ -38,14 +38,14 @@ fn performance_millis() -> Option<f64> {
     now.call0(&performance).ok()?.as_f64()
 }
 
-#[cfg(target_family = "wasm")]
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
 fn monotonic_nanos() -> u128 {
     // Fall back to the wall clock where `performance` is missing.
     let millis = performance_millis().unwrap_or_else(js_sys::Date::now);
     (millis * 1_000_000.0) as u128
 }
 
-#[cfg(not(target_family = "wasm"))]
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 fn monotonic_nanos() -> u128 {
     use std::sync::OnceLock;
     use std::time::Instant;
@@ -54,7 +54,7 @@ fn monotonic_nanos() -> u128 {
     EPOCH.get_or_init(Instant::now).elapsed().as_nanos()
 }
 
-#[cfg(target_family = "wasm")]
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
 fn wall_clock_now() -> WallClockInstant {
     let millis = js_sys::Date::now();
     let secs = (millis / 1000.0).floor();
@@ -65,7 +65,7 @@ fn wall_clock_now() -> WallClockInstant {
     }
 }
 
-#[cfg(not(target_family = "wasm"))]
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 fn wall_clock_now() -> WallClockInstant {
     use std::time::{SystemTime, UNIX_EPOCH};
 

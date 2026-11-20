@@ -14,8 +14,11 @@ use std::fs::File;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::pin;
+#[cfg(not(target_family = "wasm"))]
 use std::sync::Arc;
-use std::task::{Context, Poll, Wake, Waker};
+#[cfg(not(target_family = "wasm"))]
+use std::task::Wake;
+use std::task::{Context, Poll, Waker};
 #[cfg(not(target_family = "wasm"))]
 use std::thread::{self, Thread};
 
@@ -69,22 +72,13 @@ where
 const MAX_WASM_POLLS: usize = 1_000_000;
 
 #[cfg(target_family = "wasm")]
-struct SpinWaker;
-
-#[cfg(target_family = "wasm")]
-impl Wake for SpinWaker {
-    fn wake(self: Arc<Self>) {}
-}
-
-#[cfg(target_family = "wasm")]
 pub(crate) fn block_on<F, T, E>(fut: F) -> Result<T>
 where
     F: Future<Output = std::result::Result<T, E>>,
     E: Into<KeyRingError>,
 {
     let mut fut = pin!(fut);
-    let waker = Waker::from(Arc::new(SpinWaker));
-    let mut cx = Context::from_waker(&waker);
+    let mut cx = Context::from_waker(Waker::noop());
     for _ in 0..MAX_WASM_POLLS {
         if let Poll::Ready(out) = fut.as_mut().poll(&mut cx) {
             return out.map_err(Into::into);

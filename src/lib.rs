@@ -60,6 +60,9 @@ pub use keyring::web_storage;
 
 #[cfg(feature = "js")]
 mod wasm;
+#[cfg(feature = "js")]
+#[cfg_attr(docsrs, doc(cfg(feature = "js")))]
+pub use wasm::{Keyring, request_persistent_storage};
 #[cfg(feature = "file")]
 #[cfg_attr(docsrs, doc(cfg(feature = "file")))]
 pub use keyring::sqlcipher;

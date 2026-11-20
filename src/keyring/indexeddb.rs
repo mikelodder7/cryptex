@@ -48,7 +48,7 @@ const STORE_NAME: &str = "keyrings";
 pub struct SnapshotStore {
     name: String,
     db: IdbDatabase,
-    _hold: LockHold,
+    hold: LockHold,
 }
 
 impl SnapshotStore {
@@ -59,13 +59,21 @@ impl SnapshotStore {
         Ok(Self {
             name: name.to_string(),
             db,
-            _hold: hold,
+            hold,
         })
     }
 
     /// The name this store was opened under.
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Release the lock and wait until the browser has done so.
+    ///
+    /// Releasing is asynchronous: without this wait, opening the same name
+    /// again in the same page can still see the old lock and be refused.
+    pub async fn release(&mut self) {
+        self.hold.release_async().await;
     }
 
     /// Read the stored image, if there is one.
@@ -114,6 +122,8 @@ struct LockHold {
     release: std::rc::Rc<std::cell::RefCell<Option<js_sys::Function>>>,
     /// The promise itself: the lock is held until it settles.
     _held: js_sys::Promise,
+    /// Resolves once the lock has been released.
+    released: js_sys::Promise,
     /// The callback, kept alive because the browser may still call it.
     _callback: JsValue,
 }
@@ -195,8 +205,21 @@ impl LockHold {
         Ok(Self {
             release,
             _held: held,
+            released: request_promise,
             _callback: callback,
         })
+    }
+}
+
+impl LockHold {
+    /// Release the lock and wait for the browser to finish doing so.
+    async fn release_async(&mut self) {
+        if let Some(release) = self.release.borrow_mut().take() {
+            let _ = release.call0(&JsValue::NULL);
+        }
+        // The request settles only after the lock is gone, so awaiting it is
+        // what makes an immediate reopen of the same name work.
+        let _ = JsFuture::from(self.released.clone()).await;
     }
 }
 

@@ -52,7 +52,13 @@ web-storage = [
     "dep:js-sys",
 ]
 indexeddb = ["memory", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys"]
-opfs = ["memory", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys"]
+opfs = [
+    "turso",
+    "dep:web-sys",
+    "dep:wasm-bindgen",
+    "dep:wasm-bindgen-futures",
+    "dep:js-sys",
+]
 js = [
     "memory",
     "web-storage",

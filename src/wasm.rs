@@ -51,7 +51,7 @@ use crate::error::KeyRingError;
 use crate::indexeddb::SnapshotStore;
 use crate::memory::MemoryKeyring;
 use crate::turso::TursoKeyring;
-use crate::web_storage::{self, LocalStorageImage, WebStorageKeyring};
+use crate::web_storage::{self, LocalStorageImage};
 use crate::DynKeyRing;
 
 /// A keyring, opened from JavaScript.
@@ -69,8 +69,11 @@ enum Inner {
         store: Store,
         dirty: bool,
     },
-    Memory(MemoryKeyring),
-    WebStorage(WebStorageKeyring),
+    Memory {
+        keyring: MemoryKeyring,
+        store: Store,
+        dirty: bool,
+    },
 }
 
 enum Store {
@@ -96,7 +99,7 @@ impl Keyring {
         let name = if name.is_empty() { "default" } else { name };
         match options.backend {
             Backend::Turso => open_turso(connection, name, options.store).await,
-            Backend::Memory => open_memory(connection, name, options.store),
+            Backend::Memory => open_memory(connection, name, options.store).await,
         }
     }
 
@@ -127,7 +130,11 @@ impl Keyring {
                 let keyring =
                     MemoryKeyring::import(image, &memory_secret(connection)?).map_err(js)?;
                 Ok(Keyring {
-                    inner: Inner::Memory(keyring),
+                    inner: Inner::Memory {
+                        keyring,
+                        store: Store::None,
+                        dirty: false,
+                    },
                 })
             }
         }
@@ -139,8 +146,7 @@ impl Keyring {
             Inner::Turso { keyring, .. } => {
                 keyring.as_mut().ok_or_else(closed)?.get_secret(id)
             }
-            Inner::Memory(keyring) => keyring.get_secret(id),
-            Inner::WebStorage(keyring) => keyring.get_secret(id),
+            Inner::Memory { keyring, .. } => keyring.get_secret(id),
         }
         .map_err(js)?;
         let value: Zeroizing<Vec<u8>> = Zeroizing::new(secret.0.clone());
@@ -161,10 +167,18 @@ impl Keyring {
                 let keyring = keyring.as_mut().ok_or_else(closed)?;
                 keyring.set_secret(id, secret).map_err(js)?;
                 *dirty = true;
-                flush(keyring, store, dirty).await
+                flush(store, dirty, || keyring.export()).await
             }
-            Inner::Memory(keyring) => keyring.set_secret(id, secret).map_err(js),
-            Inner::WebStorage(keyring) => keyring.set_secret(id, secret).map_err(js),
+            Inner::Memory {
+                keyring,
+                store,
+                dirty,
+            } => {
+                keyring.set_secret(id, secret).map_err(js)?;
+                *dirty = true;
+                let keyring = &*keyring;
+                flush(store, dirty, || keyring.export()).await
+            }
         }
     }
 
@@ -179,10 +193,18 @@ impl Keyring {
                 let keyring = keyring.as_mut().ok_or_else(closed)?;
                 keyring.delete_secret(id).map_err(js)?;
                 *dirty = true;
-                flush(keyring, store, dirty).await
+                flush(store, dirty, || keyring.export()).await
             }
-            Inner::Memory(keyring) => keyring.delete_secret(id).map_err(js),
-            Inner::WebStorage(keyring) => keyring.delete_secret(id).map_err(js),
+            Inner::Memory {
+                keyring,
+                store,
+                dirty,
+            } => {
+                keyring.delete_secret(id).map_err(js)?;
+                *dirty = true;
+                let keyring = &*keyring;
+                flush(store, dirty, || keyring.export()).await
+            }
         }
     }
 
@@ -211,10 +233,18 @@ impl Keyring {
                 let rekeyed = keyring.copy_under(&params).map_err(js)?;
                 *keyring = rekeyed;
                 *dirty = true;
-                flush(keyring, store, dirty).await
+                flush(store, dirty, || keyring.export()).await
             }
-            Inner::Memory(keyring) => keyring.rekey(&memory_params(connection)?).map_err(js),
-            Inner::WebStorage(keyring) => keyring.rekey(&memory_params(connection)?).map_err(js),
+            Inner::Memory {
+                keyring,
+                store,
+                dirty,
+            } => {
+                keyring.rekey(&memory_params(connection)?).map_err(js)?;
+                *dirty = true;
+                let keyring = &*keyring;
+                flush(store, dirty, || keyring.export()).await
+            }
         }
     }
 
@@ -224,8 +254,7 @@ impl Keyring {
             Inner::Turso { keyring, .. } => {
                 keyring.as_ref().ok_or_else(closed)?.export().map_err(js)
             }
-            Inner::Memory(keyring) => keyring.export().map_err(js),
-            Inner::WebStorage(keyring) => keyring.export().map_err(js),
+            Inner::Memory { keyring, .. } => keyring.export().map_err(js),
         }
     }
 
@@ -235,17 +264,27 @@ impl Keyring {
     /// open the same name. The keyring still answers reads and writes, but it
     /// no longer has anywhere to persist them.
     pub async fn close(&mut self) -> Result<(), JsError> {
-        if let Inner::Turso {
-            keyring,
-            store,
-            dirty,
-        } = &mut self.inner
-        {
-            if let Some(keyring) = keyring.as_ref() {
-                flush(keyring, store, dirty).await?;
+        match &mut self.inner {
+            Inner::Turso {
+                keyring,
+                store,
+                dirty,
+            } => {
+                if let Some(keyring) = keyring.as_ref() {
+                    flush(store, dirty, || keyring.export()).await?;
+                }
+                *keyring = None;
+                release(store).await;
             }
-            *keyring = None;
-            *store = Store::None;
+            Inner::Memory {
+                keyring,
+                store,
+                dirty,
+            } => {
+                // The secrets stay readable; they just have nowhere to go.
+                flush(store, dirty, || keyring.export()).await?;
+                release(store).await;
+            }
         }
         Ok(())
     }
@@ -295,37 +334,67 @@ async fn open_turso(connection: &str, name: &str, store: StoreKind) -> Result<Ke
     })
 }
 
-fn open_memory(connection: &str, name: &str, store: StoreKind) -> Result<Keyring, JsError> {
-    match store {
+async fn open_memory(connection: &str, name: &str, store: StoreKind) -> Result<Keyring, JsError> {
+    let params = memory_params(connection)?;
+    let secret = memory_secret(connection)?;
+    let (keyring, store) = match store {
+        StoreKind::IndexedDb => {
+            let snapshot = SnapshotStore::open(name).await.map_err(js)?;
+            let keyring = match snapshot.load().await.map_err(js)? {
+                Some(image) => MemoryKeyring::import(&image, &secret).map_err(js)?,
+                None => MemoryKeyring::with_params(&params).map_err(js)?,
+            };
+            (keyring, Store::IndexedDb(snapshot))
+        }
         StoreKind::LocalStorage => {
-            let keyring =
-                WebStorageKeyring::with_params(&memory_params(connection)?, Some(name)).map_err(js)?;
-            Ok(Keyring {
-                inner: Inner::WebStorage(keyring),
-            })
+            let image = LocalStorageImage::new(Some(name))?;
+            let keyring = match image.load()? {
+                Some(bytes) => MemoryKeyring::import(&bytes, &secret).map_err(js)?,
+                None => MemoryKeyring::with_params(&params).map_err(js)?,
+            };
+            (keyring, Store::LocalStorage(image))
         }
-        StoreKind::IndexedDb | StoreKind::Opfs | StoreKind::Memory => {
-            let keyring = MemoryKeyring::with_params(&memory_params(connection)?).map_err(js)?;
-            Ok(Keyring {
-                inner: Inner::Memory(keyring),
-            })
+        StoreKind::Memory => (MemoryKeyring::with_params(&params).map_err(js)?, Store::None),
+        // Refused when the options are parsed; OPFS stores database files.
+        StoreKind::Opfs => {
+            return Err(JsError::new(
+                "TypeError: the opfs store needs backend: \"turso\"",
+            ));
         }
-    }
+    };
+    Ok(Keyring {
+        inner: Inner::Memory {
+            keyring,
+            store,
+            dirty: false,
+        },
+    })
 }
 
-async fn flush(keyring: &TursoKeyring, store: &Store, dirty: &mut bool) -> Result<(), JsError> {
+/// Drop the store, releasing a Web Lock only once the browser has done so.
+async fn release(store: &mut Store) {
+    if let Store::IndexedDb(snapshot) = store {
+        snapshot.release().await;
+    }
+    *store = Store::None;
+}
+
+/// Write the keyring's current image to its store.
+///
+/// Nothing to do for a keyring that keeps its own data (OPFS) or has no store:
+/// `image` is only called when a store actually needs a copy.
+async fn flush(
+    store: &Store,
+    dirty: &mut bool,
+    image: impl FnOnce() -> Result<Vec<u8>, KeyRingError>,
+) -> Result<(), JsError> {
     if !*dirty {
         return Ok(());
     }
     match store {
-        // OPFS holds the database file itself: Turso's own writes are the
-        // persistence, so there is no image to copy out.
         Store::None | Store::Opfs => {}
-        Store::IndexedDb(snapshot) => snapshot
-            .save(&keyring.export().map_err(js)?)
-            .await
-            .map_err(js)?,
-        Store::LocalStorage(local) => local.save(&keyring.export().map_err(js)?)?,
+        Store::IndexedDb(snapshot) => snapshot.save(&image().map_err(js)?).await.map_err(js)?,
+        Store::LocalStorage(local) => local.save(&image().map_err(js)?)?,
     }
     *dirty = false;
     Ok(())

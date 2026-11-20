@@ -135,8 +135,12 @@ open. `rekey` re-derives the key without touching the secrets.
 | Feature | `wasm32-unknown-unknown` | WASI | Notes |
 |---------|--------------------------|------|-------|
 | `memory` | yes | yes | encrypted in RAM, export/import |
-| `turso` | yes | yes | Turso's native page encryption |
-| `turso-encrypted-io` | yes | yes | page cipher in a custom IO |
+| `turso` | yes | yes | Turso's native page encryption, including in-memory and OPFS keyrings |
+| `turso-encrypted-io` | builds | yes | the page cipher needs a `PageStore`; the file-backed one is native only |
+| `web-storage` | yes | no | a `MemoryKeyring` sealed into `localStorage` |
+| `indexeddb` | yes | no | encrypted image snapshots, one per keyring |
+| `opfs` | yes | no | the database file itself in the origin private file system |
+| `js` | yes | no | the `wasm-bindgen` `Keyring` class |
 | `file`, `encrypted-vfs` | no | no | SQLCipher and the bundled C VFS are native only |
 | OS keyrings, `yubihsm-*` | no | no | no OS keychain or USB device |
 
@@ -151,6 +155,71 @@ repository's `.cargo/config.toml` sets it, and a CI job that overrides
 RUSTFLAGS='--cfg getrandom_backend="wasm_js"' \
   cargo check --target wasm32-unknown-unknown --no-default-features --features turso
 ```
+
+### Browser keyrings
+
+The `js` feature wraps the backends in a `Keyring` class for JavaScript:
+
+```bash
+wasm-pack build --target web --no-default-features --features js
+```
+
+```js
+import init, { Keyring, requestPersistentStorage } from "./pkg/cryptex.js";
+
+await init();
+
+// An encrypted Turso database, persisted in IndexedDB. These are the defaults.
+const keyring = await Keyring.open("password=hunter2 salt=0okm9ijn8uhb7ygv", "settings");
+await keyring.set("api-token", new TextEncoder().encode("s3cret"));
+const token = keyring.get("api-token"); // Uint8Array
+await keyring.delete("api-token");
+
+// Ask the browser not to evict the origin's storage.
+await requestPersistentStorage();
+await keyring.close();
+```
+
+`open(connection, name, options)` chooses where the keyring lives:
+
+| `backend` | `store` | What is persisted |
+|-----------|---------|-------------------|
+| `"turso"` (default) | `"indexeddb"` (default) | the encrypted database image, saved after every change |
+| `"turso"` | `"opfs"` | the database file itself, in the origin private file system |
+| `"turso"` | `"memory"` | nothing; `export()` the image yourself |
+| `"memory"` | `"localstorage"` | a sealed blob under `localStorage["cryptex:<name>"]` |
+| `"memory"` | `"memory"` | nothing |
+
+`import(connection, image, options)` reopens an image returned by `export()`,
+and `rekey(connection)` changes its password.
+
+Every store keeps the data encrypted; the key comes from the password (or raw
+key) in the connection string, so a store with the wrong connection string
+fails with `AccessDenied` instead of returning garbage.
+
+A `set` or `delete` that resolves has reached the store. An IndexedDB keyring
+also holds a Web Lock named after itself, so a second tab that opens the same
+name fails with `AccessDenied` instead of overwriting the first tab's secrets;
+`close()` releases the lock, and with OPFS the sync access handle, so close a
+keyring before opening it again in the same context.
+
+OPFS needs `createSyncAccessHandle()`, which browsers expose only in a
+dedicated worker, so `store: "opfs"` is refused on the main thread. A worker
+can use IndexedDB too. `examples/web/` has a page that uses IndexedDB and a
+worker that uses OPFS; serve it over HTTP (`python3 -m http.server`), because
+wasm modules and OPFS are not available on `file://` URLs.
+
+Errors are `Error` objects whose message starts with the kind, so a caller can
+switch on `ItemNotFound:`, `AccessDenied:`, `TypeError:` or `GeneralError:`
+without parsing the rest.
+
+Two costs are worth planning for. Any script the origin loads can read
+IndexedDB, OPFS and `localStorage`, so the encryption protects against other
+origins and other users, not against a compromised page.
+`requestPersistentStorage()` asks the browser to keep the data, but it may
+refuse, and clearing site data always removes it. Key derivation runs Argon2,
+which blocks the thread it runs on: with a large `memory=` value, open the
+keyring in a worker or the page freezes until it finishes.
 
 ### Bringing your own storage
 
