@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>cryptex in the browser</title>
+    <link rel="icon" href="data:," />
     <style>
       :root {
         color-scheme: light dark;
@@ -29,6 +30,7 @@
         margin: 0.5rem 0 0.25rem;
       }
       input,
+      select,
       button {
         font: inherit;
         padding: 0.35rem 0.5rem;
@@ -76,15 +78,26 @@
         text-decoration: underline;
         cursor: pointer;
       }
+      button.link:disabled {
+        text-decoration: none;
+        cursor: default;
+        opacity: 0.75;
+      }
+      .list .store {
+        display: inline-block;
+        min-width: 6.5rem;
+        font-size: 0.75rem;
+        opacity: 0.6;
+      }
     </style>
   </head>
   <body>
     <h1>cryptex in the browser</h1>
     <p class="hint">
-      The keyring is a Turso database kept in IndexedDB. Everything you store is
-      encrypted with a key derived from the password; any script on this origin
-      can read the ciphertext, so pick a password you would not reuse
-      carelessly.
+      A keyring is a Turso database, either kept in IndexedDB (one image per
+      keyring) or in localStorage. Everything you store is encrypted with a key
+      derived from the password; any script on this origin can read the
+      ciphertext, so pick a password you would not reuse carelessly.
     </p>
 
     <fieldset>
@@ -93,6 +106,11 @@
       <input id="password" type="password" value="correct-horse-battery-staple" autocomplete="off" />
       <label for="name">Name</label>
       <input id="name" type="text" value="example" autocomplete="off" />
+      <label for="store">Store</label>
+      <select id="store">
+        <option value="indexeddb" selected>IndexedDB</option>
+        <option value="localstorage">localStorage</option>
+      </select>
       <button id="open">Open</button>
       <button id="persist">Ask for persistent storage</button>
     </fieldset>

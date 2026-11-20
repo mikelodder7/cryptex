@@ -394,6 +394,56 @@ async fn open_directory() -> Result<FileSystemDirectoryHandle> {
     Ok(directory)
 }
 
+/// Names of every keyring stored under `cryptex/` in the origin's OPFS.
+///
+/// Reads the directory listing only, so it works from a page even though
+/// opening a keyring needs a worker (sync access handles are worker-only).
+pub async fn list_names() -> Result<Vec<String>> {
+    use wasm_bindgen::JsValue;
+
+    let directory = open_directory().await?;
+    let keys: js_sys::Function = js_sys::Reflect::get(&directory, &JsValue::from_str("keys"))
+        .map_err(js_error)?
+        .dyn_into()
+        .map_err(|_| unsupported("this browser cannot list OPFS files"))?;
+    let iterator = keys.call0(&directory).map_err(js_error)?;
+    let next: js_sys::Function = js_sys::Reflect::get(&iterator, &JsValue::from_str("next"))
+        .map_err(js_error)?
+        .dyn_into()
+        .map_err(js_error)?;
+
+    let mut names = Vec::new();
+    loop {
+        // `keys()` is an async iterator: each step is a promise for
+        // `{ value, done }`.
+        let step = JsFuture::from(
+            next.call0(&iterator)
+                .map_err(js_error)?
+                .dyn_into::<js_sys::Promise>()
+                .map_err(js_error)?,
+        )
+        .await
+        .map_err(js_error)?;
+        let done = js_sys::Reflect::get(&step, &JsValue::from_str("done"))
+            .map_err(js_error)?
+            .as_bool()
+            .unwrap_or(true);
+        if done {
+            break;
+        }
+        let value = js_sys::Reflect::get(&step, &JsValue::from_str("value")).map_err(js_error)?;
+        // Every keyring is `<name>.db3`; the WAL next to it is not a keyring.
+        if let Some(name) = value
+            .as_string()
+            .and_then(|name| name.strip_suffix(".db3").map(str::to_string))
+        {
+            names.push(name);
+        }
+    }
+    names.sort();
+    Ok(names)
+}
+
 fn js_error(value: wasm_bindgen::JsValue) -> KeyRingError {
     KeyRingError::from(value)
 }

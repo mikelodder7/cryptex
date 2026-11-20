@@ -194,6 +194,11 @@ await keyring.close();
 `import(connection, image, options)` reopens an image returned by `export()`,
 and `rekey(connection)` changes its password.
 
+`keyring.keys()` lists the ids inside an open keyring, and
+`storedKeyrings({ store })` lists the keyrings the origin already has in
+`"indexeddb"` (the default), `"localstorage"` or `"opfs"`, without opening
+anything. Listing OPFS works from a page; opening an OPFS keyring does not.
+
 Every store keeps the data encrypted; the key comes from the password (or raw
 key) in the connection string, so a store with the wrong connection string
 fails with `AccessDenied` instead of returning garbage.

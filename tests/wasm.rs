@@ -73,10 +73,58 @@ async fn keys_and_keyring_names_are_listed() {
     );
 
     // A page can list what is stored without opening anything.
-    let stored = cryptex::stored_keyrings().await.expect("the store lists");
+    let stored = cryptex::stored_keyrings(wasm_bindgen::JsValue::UNDEFINED)
+        .await
+        .expect("the store lists");
     assert!(stored.contains(&name));
 
     keyring.close().await.expect("close succeeds");
+}
+
+#[wasm_bindgen_test]
+async fn every_store_lists_its_keyrings() {
+    use wasm_bindgen::JsValue;
+
+    let indexeddb = cryptex::stored_keyrings(JsValue::UNDEFINED)
+        .await
+        .expect("IndexedDB lists");
+    assert!(indexeddb.is_sorted());
+
+    // localStorage is a page API, so this test also covers the page case.
+    let name = unique_name("localstorage");
+    let mut keyring = Keyring::open(
+        CONNECTION,
+        &name,
+        js_sys::JSON::parse(r#"{"backend":"turso","store":"localstorage"}"#)
+            .expect("the options are JSON"),
+    )
+    .await
+    .expect("a localStorage keyring opens");
+    keyring.set("token", b"value").await.expect("set succeeds");
+    keyring.close().await.expect("close succeeds");
+
+    let listed = cryptex::stored_keyrings(
+        js_sys::JSON::parse(r#"{"store":"localstorage"}"#).expect("the options are JSON"),
+    )
+    .await
+    .expect("localStorage lists");
+    assert!(listed.contains(&name), "{listed:?} lacks {name}");
+
+    // OPFS listing reads the directory, which works from a page even though
+    // opening an OPFS keyring needs a worker.
+    let opfs = cryptex::stored_keyrings(
+        js_sys::JSON::parse(r#"{"store":"opfs"}"#).expect("the options are JSON"),
+    )
+    .await
+    .expect("OPFS lists");
+    assert!(opfs.is_sorted());
+
+    let memory = cryptex::stored_keyrings(
+        js_sys::JSON::parse(r#"{"store":"memory"}"#).expect("the options are JSON"),
+    )
+    .await
+    .expect("memory lists");
+    assert!(memory.is_empty());
 }
 
 #[wasm_bindgen_test]

@@ -215,6 +215,29 @@ pub async fn request_persistent_storage() -> Result<bool> {
     Ok(value.as_bool().unwrap_or(false))
 }
 
+/// Names of every keyring this origin keeps in `localStorage`.
+///
+/// Reads the entry names only, never the images. A keyring entry is
+/// `cryptex:<name>`, the key [`LocalStorageImage`] writes for that name.
+pub fn list_names() -> Result<Vec<String>> {
+    const PREFIX: &str = "cryptex:";
+
+    let storage = storage()?;
+    let length = storage.length().map_err(js_error)?;
+    let mut names = Vec::new();
+    for index in 0..length {
+        if let Some(name) = storage
+            .key(index)
+            .map_err(js_error)?
+            .and_then(|key| key.strip_prefix(PREFIX).map(str::to_string))
+        {
+            names.push(name);
+        }
+    }
+    names.sort();
+    Ok(names)
+}
+
 fn storage() -> Result<web_sys::Storage> {
     let window = web_sys::window().ok_or_else(|| KeyRingError::GeneralError {
         msg: "localStorage is not available here: it exists only on a page, not in a worker"

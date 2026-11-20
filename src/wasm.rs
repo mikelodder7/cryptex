@@ -306,13 +306,20 @@ pub async fn request_persistent_storage() -> Result<bool, JsError> {
     web_storage::request_persistent_storage().await.map_err(js)
 }
 
-/// Every keyring IndexedDB holds for this origin, in name order.
+/// The keyrings this origin already has in one store, in name order.
 ///
-/// Works without opening anything, so a page can list what is stored before
-/// the user picks one.
+/// `storedKeyrings({ store })` reads `indexeddb` (the default), `localstorage`
+/// or `opfs` without opening anything, so a page can show what is stored
+/// before the user picks a keyring. Nothing is listed for `memory`, which
+/// keeps no store of its own.
 #[wasm_bindgen(js_name = "storedKeyrings")]
-pub async fn stored_keyrings() -> Result<Vec<String>, JsError> {
-    SnapshotStore::list_names().await.map_err(js)
+pub async fn stored_keyrings(options: JsValue) -> Result<Vec<String>, JsError> {
+    match Options::parse(options)?.store {
+        StoreKind::IndexedDb => SnapshotStore::list_names().await.map_err(js),
+        StoreKind::LocalStorage => web_storage::list_names().map_err(js),
+        StoreKind::Opfs => crate::opfs::list_names().await.map_err(js),
+        StoreKind::Memory => Ok(Vec::new()),
+    }
 }
 
 async fn open_turso(connection: &str, name: &str, store: StoreKind) -> Result<Keyring, JsError> {
