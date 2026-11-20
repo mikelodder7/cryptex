@@ -51,7 +51,12 @@ pub use keyring::linux;
 pub use keyring::macos;
 #[cfg(feature = "memory")]
 #[cfg_attr(docsrs, doc(cfg(feature = "memory")))]
+#[cfg(feature = "indexeddb")]
+pub use keyring::indexeddb;
+#[cfg(feature = "memory")]
 pub use keyring::memory;
+#[cfg(feature = "web-storage")]
+pub use keyring::web_storage;
 #[cfg(feature = "file")]
 #[cfg_attr(docsrs, doc(cfg(feature = "file")))]
 pub use keyring::sqlcipher;

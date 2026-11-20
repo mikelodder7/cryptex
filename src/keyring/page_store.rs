@@ -58,11 +58,11 @@ impl PageStore for File {
 }
 
 /// A [`PageStore`] held entirely in memory.
-#[cfg(any(feature = "turso", feature = "opfs"))]
+#[cfg(feature = "turso")]
 #[derive(Default)]
 pub(crate) struct MemPages(Vec<u8>);
 
-#[cfg(any(feature = "turso", feature = "opfs"))]
+#[cfg(feature = "turso")]
 impl MemPages {
     pub(crate) fn new() -> Self {
         Self(Vec::new())
@@ -77,7 +77,7 @@ impl MemPages {
     }
 }
 
-#[cfg(any(feature = "turso", feature = "opfs"))]
+#[cfg(feature = "turso")]
 impl PageStore for MemPages {
     fn len(&self) -> io::Result<u64> {
         Ok(self.0.len() as u64)

@@ -44,9 +44,15 @@ name = "cryptex"
 default = ["linux-secret-service", "macos-keychain", "windows-credentials"]
 file = ["dep:argon2", "dep:dirs", "dep:rusqlite", "rusqlite/bundled-sqlcipher-vendored-openssl"]
 memory = ["dep:argon2", "dep:chacha20poly1305", "dep:aes-gcm", "dep:getrandom"]
-web-storage = ["memory", "dep:web-sys", "dep:wasm-bindgen"]
-indexeddb = ["dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys"]
-opfs = ["dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys"]
+web-storage = [
+    "memory",
+    "dep:web-sys",
+    "dep:wasm-bindgen",
+    "dep:wasm-bindgen-futures",
+    "dep:js-sys",
+]
+indexeddb = ["memory", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys"]
+opfs = ["memory", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys"]
 js = [
     "memory",
     "indexeddb",
@@ -114,8 +120,10 @@ web-sys = { version = "0.3", optional = true, features = [
     "IdbObjectStore",
     "IdbTransaction",
     "IdbTransactionMode",
+    "DomException",
     "IdbRequest",
     "FileSystemDirectoryHandle",
+    "FileSystemGetDirectoryOptions",
     "FileSystemFileHandle",
     "FileSystemGetFileOptions",
     "FileSystemSyncAccessHandle",

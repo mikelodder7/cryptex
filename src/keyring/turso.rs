@@ -16,6 +16,8 @@ use zeroize::{Zeroize, Zeroizing};
 
 use super::file_common::{self, CipherParam, derive_key_32, file_keyring, secure_file};
 use super::turso_common::TursoFile;
+#[cfg(feature = "opfs")]
+use super::opfs::OpfsIo;
 use super::turso_web::WebIo;
 use crate::error::KeyRingError;
 
@@ -176,6 +178,17 @@ impl TursoKeyring {
         Self::with_io(io, path, params).map_err(|_| KeyRingError::AccessDenied {
             msg: "Invalid key or corrupted keyring image".to_string(),
         })
+    }
+
+    /// Open (or create) the keyring in the origin private file system.
+    ///
+    /// Only available in a browser worker: OPFS sync access handles exist
+    /// nowhere else. The database and its WAL live under `cryptex/<name>.db3`.
+    #[cfg(feature = "opfs")]
+    pub async fn open_opfs(params: &ConnectionParams, name: &str) -> Result<Self> {
+        let io: Arc<dyn core::IO> = Arc::new(OpfsIo::open(name).await?);
+        let keyring = Self::with_io(io, &format!("{name}.db3"), params)?;
+        Ok(keyring)
     }
 
     /// Copy the whole in-memory database into one encrypted blob.
