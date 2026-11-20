@@ -500,8 +500,11 @@ pub(crate) fn acquire_single_opener_lock(db_path: &Path) -> Result<File> {
         Err(TryLockError::WouldBlock) => Err(KeyRingError::AccessDenied {
             msg: "keyring is already open by another process".to_string(),
         }),
-        // WASI and some network filesystems do not implement locking; a
-        // keyring there relies on the caller keeping a single writer.
+        // WASI does not implement locking at all, so a keyring there relies on
+        // the caller keeping a single writer. Everywhere else a filesystem
+        // that refuses to lock is an error: FUSE, NFS and SMB mounts report
+        // `Unsupported`, and opening unlocked would let two writers race.
+        #[cfg(target_os = "wasi")]
         Err(TryLockError::Error(e)) if e.kind() == std::io::ErrorKind::Unsupported => Ok(file),
         Err(TryLockError::Error(e)) => Err(KeyRingError::GeneralError {
             msg: format!("unable to lock keyring: {}", e),
@@ -627,8 +630,18 @@ impl<'a> Parser<'a> {
         };
 
         let mut connection_string = ConnectionParams::default();
+        // A repeated keyword used to overwrite the first one, so a password
+        // that contained ` salt=...` could silently swap the salt or turn the
+        // password into a raw key.
+        let mut seen: Vec<&'a str> = Vec::new();
 
         while let Some((key, value)) = parser.parameter()? {
+            if seen.contains(&key) {
+                return Err(KeyRingError::GeneralError {
+                    msg: format!("duplicate parameter: {}", key),
+                });
+            }
+            seen.push(key);
             connection_string.param(key, &value)?;
         }
         Ok(connection_string)

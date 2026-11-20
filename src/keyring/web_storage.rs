@@ -28,6 +28,11 @@
 //! under storage pressure unless the site has been granted persistent storage
 //! ([`request_persistent_storage`]). The image is encrypted, so what a script
 //! gets is ciphertext.
+//!
+//! There is no cross-tab lock here: the whole image is rewritten on every
+//! change, so two tabs on one name would lose each other's secrets. Take the
+//! `cryptex:<name>` Web Lock first, as the JavaScript `Keyring` does, or give
+//! each tab its own name.
 
 use super::cipher::CipherAlgorithm;
 use super::file_common;

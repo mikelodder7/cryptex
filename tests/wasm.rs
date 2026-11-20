@@ -39,6 +39,46 @@ async fn memory_keyring_round_trips() {
 }
 
 #[wasm_bindgen_test]
+async fn a_closed_keyring_refuses_every_call() {
+    let mut keyring = Keyring::open(CONNECTION, &unique_name("closed"), Default::default())
+        .await
+        .expect("a memory keyring opens");
+    keyring.set("token", b"secret").await.expect("set succeeds");
+    keyring.close().await.expect("close succeeds");
+
+    let error = keyring
+        .set("token", b"other")
+        .await
+        .expect_err("a closed keyring refuses writes");
+    assert!(format!("{error:?}").contains("closed"), "{error:?}");
+    assert!(keyring.get("token").is_err());
+    assert!(keyring.delete("token").await.is_err());
+    assert!(keyring.keys().is_err());
+}
+
+#[wasm_bindgen_test]
+async fn local_storage_takes_one_opener() {
+    // Two tabs rewriting one image would lose each other's secrets, so the
+    // second opener is refused instead.
+    let name = unique_name("locked");
+    let options =
+        || js_sys::JSON::parse(r#"{"store":"localstorage"}"#).expect("the options are JSON");
+
+    let mut first = Keyring::open(CONNECTION, &name, options())
+        .await
+        .expect("the first opener gets the keyring");
+    let second = Keyring::open(CONNECTION, &name, options()).await;
+    assert!(second.is_err(), "a second opener must be refused");
+
+    // Closing releases the lock, so the name can be opened again.
+    first.close().await.expect("close succeeds");
+    let mut reopened = Keyring::open(CONNECTION, &name, options())
+        .await
+        .expect("closing releases the lock");
+    reopened.close().await.expect("close succeeds");
+}
+
+#[wasm_bindgen_test]
 async fn indexeddb_keeps_the_secrets() {
     let name = unique_name("indexeddb");
 

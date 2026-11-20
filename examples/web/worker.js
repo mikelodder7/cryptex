@@ -17,6 +17,11 @@ let ready = null;
 let keyring = null;
 
 async function open({ password, name }) {
+  // The connection string is whitespace-separated, so a password that holds a
+  // space, or a ` salt=` of its own, would change how it is parsed.
+  if (!password || /\s/.test(password)) {
+    throw new Error("the password must be non-empty and cannot contain spaces");
+  }
   ready ??= init();
   await ready;
   if (keyring) await keyring.close();

@@ -87,8 +87,14 @@ impl SnapshotStore {
         drop(tx);
         if value.is_undefined() || value.is_null() {
             Ok(None)
-        } else {
+        } else if value.is_instance_of::<js_sys::Uint8Array>() {
             Ok(Some(js_sys::Uint8Array::new(&value).to_vec()))
+        } else {
+            // `Uint8Array::new` would allocate whatever length the stored
+            // value claims; refuse anything that is not already an image.
+            Err(KeyRingError::AccessDenied {
+                msg: "the stored keyring is not an image".to_string(),
+            })
         }
     }
 
@@ -141,7 +147,7 @@ impl SnapshotStore {
 ///
 /// The lock lives as long as the promise the callback returns, so dropping
 /// this resolves that promise and lets the next tab in.
-struct LockHold {
+pub(crate) struct LockHold {
     /// Resolves the promise the lock callback returned.
     release: std::rc::Rc<std::cell::RefCell<Option<js_sys::Function>>>,
     /// The promise itself: the lock is held until it settles.
@@ -153,7 +159,7 @@ struct LockHold {
 }
 
 impl LockHold {
-    async fn acquire(name: &str) -> Result<Self> {
+    pub(crate) async fn acquire(name: &str) -> Result<Self> {
         let locks = Reflect::get(&navigator()?, &JsValue::from_str("locks")).map_err(js_error)?;
         if locks.is_undefined() || locks.is_null() {
             return Err(unsupported(
@@ -238,7 +244,7 @@ impl LockHold {
 
 impl LockHold {
     /// Release the lock and wait for the browser to finish doing so.
-    async fn release_async(&mut self) {
+    pub(crate) async fn release_async(&mut self) {
         if let Some(release) = self.release.borrow_mut().take() {
             let _ = release.call0(&JsValue::NULL);
         }
@@ -343,8 +349,19 @@ async fn await_transaction(tx: &IdbTransaction) -> Result<()> {
                 let _ = reject.call1(&JsValue::NULL, &err);
             })
         };
+        // A quota or abort failure fires neither event reliably in every
+        // browser, and an unsettled promise would make `set` hang forever.
+        let on_abort = {
+            let tx = tx.clone();
+            let reject = reject.clone();
+            Closure::<dyn FnMut(JsValue)>::once_into_js(move |_event: JsValue| {
+                let err = tx.error().map(JsValue::from).unwrap_or(JsValue::NULL);
+                let _ = reject.call1(&JsValue::NULL, &err);
+            })
+        };
         tx.set_oncomplete(Some(on_complete.unchecked_ref()));
         tx.set_onerror(Some(on_error.unchecked_ref()));
+        tx.set_onabort(Some(on_abort.unchecked_ref()));
     });
     JsFuture::from(promise).await.map(|_| ()).map_err(js_error)
 }

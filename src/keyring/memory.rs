@@ -55,6 +55,15 @@ const BLOB_VERSION: u8 = 1;
 const HEADER_LEN: usize = 8 + 1 + 1 + 1 + 4 + 4 + 4 + 4;
 const NONCE_SIZE: usize = 12;
 
+/// Highest Argon2 costs an imported blob may ask for.
+///
+/// The costs sit in an unauthenticated header, so they are checked before
+/// Argon2 runs: a crafted sixteen-byte blob would otherwise ask for terabytes
+/// and minutes of work before the AEAD notices it is not authentic.
+const MAX_IMPORT_MEMORY_KIB: u32 = 1024 * 1024;
+const MAX_IMPORT_THREADS: u32 = 64;
+const MAX_IMPORT_PARALLEL: u32 = 64;
+
 /// How the blob's key was produced.
 mod kind {
     /// Argon2id over password + salt.
@@ -136,14 +145,24 @@ impl Sealer {
 
 /// Length-prefixed encoding of the secret table:
 /// `count(u32) | [id_len(u32) id value_len(u32) value]*`.
-fn encode_secrets(secrets: &BTreeMap<String, Zeroizing<Vec<u8>>>) -> Result<Vec<u8>> {
+fn encode_secrets(secrets: &BTreeMap<String, Zeroizing<Vec<u8>>>) -> Result<Zeroizing<Vec<u8>>> {
     let too_long = |what: &str| KeyRingError::GeneralError {
         msg: format!("{} is too large to export", what),
     };
-    let mut out = u32::try_from(secrets.len())
-        .map_err(|_| too_long("the secret count"))?
-        .to_le_bytes()
-        .to_vec();
+    // Size the buffer up front: a growing buffer copies the plaintext into
+    // freed allocations, which zeroizing afterwards cannot reach.
+    let mut len: usize = 4;
+    for (id, value) in secrets {
+        len = len
+            .checked_add(4 + id.len() + 4 + value.len())
+            .ok_or_else(|| too_long("the secret table"))?;
+    }
+    let mut out = Zeroizing::new(Vec::with_capacity(len));
+    out.extend_from_slice(
+        &u32::try_from(secrets.len())
+            .map_err(|_| too_long("the secret count"))?
+            .to_le_bytes(),
+    );
     for (id, value) in secrets {
         let id_len = u32::try_from(id.len()).map_err(|_| too_long("a secret id"))?;
         let value_len = u32::try_from(value.len()).map_err(|_| too_long("a secret value"))?;
@@ -238,6 +257,14 @@ impl MemoryKeyring {
     /// [`KeyRingError::AccessDenied`].
     pub fn import(blob: &[u8], password_or_key: &[u8]) -> Result<Self> {
         let header = Self::parse_header(blob)?;
+        if header.memory > MAX_IMPORT_MEMORY_KIB
+            || header.threads > MAX_IMPORT_THREADS
+            || header.parallel > MAX_IMPORT_PARALLEL
+        {
+            return Err(KeyRingError::GeneralError {
+                msg: "the keyring blob asks for unreasonable Argon2 costs".to_string(),
+            });
+        }
         let params = ConnectionParams {
             key: if header.kind == kind::RAW_KEY {
                 password_or_key.to_vec()
@@ -298,11 +325,15 @@ impl MemoryKeyring {
         let threads = read_u32(blob, &mut pos).ok_or_else(invalid_blob)?;
         let parallel = read_u32(blob, &mut pos).ok_or_else(invalid_blob)?;
         let salt_len = read_u32(blob, &mut pos).ok_or_else(invalid_blob)? as usize;
-        let salt = blob
-            .get(HEADER_LEN..HEADER_LEN + salt_len)
-            .ok_or_else(invalid_blob)?;
+        // `usize` is 32 bits on wasm32, so this addition can wrap before a
+        // bounds check would notice.
+        let salt_end = HEADER_LEN.checked_add(salt_len).ok_or_else(invalid_blob)?;
+        let salt = blob.get(HEADER_LEN..salt_end).ok_or_else(invalid_blob)?;
         // The body must hold a nonce and at least the AEAD tag.
-        if salt_len.checked_add(HEADER_LEN + NONCE_SIZE + 16) > Some(blob.len()) {
+        let body_start = salt_end
+            .checked_add(NONCE_SIZE + 16)
+            .ok_or_else(invalid_blob)?;
+        if body_start > blob.len() {
             return Err(invalid_blob());
         }
         Ok(Header {
@@ -325,7 +356,7 @@ impl MemoryKeyring {
             msg: format!("unable to generate a nonce: {}", e),
         })?;
 
-        let plaintext = Zeroizing::new(encode_secrets(&self.secrets)?);
+        let plaintext = encode_secrets(&self.secrets)?;
         let salt_len = u32::try_from(self.salt.len()).map_err(|_| KeyRingError::GeneralError {
             msg: "salt is too long to export".to_string(),
         })?;
@@ -420,6 +451,7 @@ mod tests {
     use super::super::DynKeyRing;
     use super::{CipherAlgorithm, ConnectionParams, HEADER_LEN, MemoryKeyring};
     use crate::error::KeyRingError;
+    use argon2::Params as Argon2Params;
 
     const PASSWORD: &[u8] = b"1qaz2wsx3edc4rfv";
 
@@ -483,6 +515,66 @@ mod tests {
             MemoryKeyring::import(&blob, b"wrong"),
             Err(KeyRingError::AccessDenied { .. })
         ));
+    }
+
+    /// A blob header with whatever Argon2 costs a hostile image would ask for.
+    fn blob_with_costs(memory: u32, threads: u32, parallel: u32, salt_len: u32) -> Vec<u8> {
+        let mut blob = Vec::new();
+        blob.extend_from_slice(b"CRYPTEX\0");
+        blob.push(1); // version
+        blob.push(super::kind::PASSWORD);
+        blob.push(super::seal_cipher(CipherAlgorithm::default()));
+        blob.extend_from_slice(&memory.to_le_bytes());
+        blob.extend_from_slice(&threads.to_le_bytes());
+        blob.extend_from_slice(&parallel.to_le_bytes());
+        blob.extend_from_slice(&salt_len.to_le_bytes());
+        blob.extend_from_slice(b"saltsalt");
+        blob.extend_from_slice(&[0u8; super::NONCE_SIZE + 16]);
+        blob
+    }
+
+    #[test]
+    fn import_refuses_unreasonable_costs_before_deriving() {
+        // These sit in an unauthenticated header, so they must be bounded
+        // before Argon2 tries to honour them.
+        for (memory, threads, parallel) in [
+            (u32::MAX, 1, 1),
+            (Argon2Params::DEFAULT_M_COST, u32::MAX, 1),
+            (Argon2Params::DEFAULT_M_COST, 1, u32::MAX),
+        ] {
+            let blob = blob_with_costs(memory, threads, parallel, 8);
+            assert!(matches!(
+                MemoryKeyring::import(&blob, PASSWORD),
+                Err(KeyRingError::GeneralError { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn import_refuses_a_salt_length_that_would_overflow() {
+        // `usize` is 32 bits on wasm32, where the old bounds check wrapped and
+        // a debug build then panicked slicing the blob.
+        let blob = blob_with_costs(
+            Argon2Params::DEFAULT_M_COST,
+            Argon2Params::DEFAULT_T_COST,
+            Argon2Params::DEFAULT_P_COST,
+            u32::MAX,
+        );
+        assert!(matches!(
+            MemoryKeyring::import(&blob, PASSWORD),
+            Err(KeyRingError::AccessDenied { .. })
+        ));
+    }
+
+    #[test]
+    fn a_duplicate_parameter_is_refused() {
+        // A password containing ` salt=` used to silently replace the salt.
+        assert!(
+            "password=a salt=b salt=c"
+                .parse::<ConnectionParams>()
+                .is_err()
+        );
+        assert!("password=a password=b".parse::<ConnectionParams>().is_err());
     }
 
     #[test]
