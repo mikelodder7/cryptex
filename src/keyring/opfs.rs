@@ -180,6 +180,9 @@ impl PageStore for OpfsPages {
 /// obtained asynchronously: `open_file` itself cannot await.
 pub(crate) struct OpfsIo {
     files: HashMap<String, Arc<OpfsFile>>,
+    /// Distinguishes this IO in Turso's process-wide database registry, which
+    /// is keyed by `file_id`; see `WebIo::instance`.
+    instance: String,
 }
 
 impl OpfsIo {
@@ -192,7 +195,10 @@ impl OpfsIo {
             let pages = OpfsPages::open(&path).await?;
             files.insert(path, Arc::new(OpfsFile::new(pages)));
         }
-        Ok(Self { files })
+        Ok(Self {
+            files,
+            instance: super::turso_web::new_instance(),
+        })
     }
 
     /// Flush both files to disk and release their handles.
@@ -252,7 +258,10 @@ impl ::turso::core::IO for OpfsIo {
     }
 
     fn file_id(&self, path: &str) -> std::result::Result<FileId, LimboError> {
-        Ok(FileId::from_path_hash(path))
+        Ok(FileId::from_path_hash(&format!(
+            "{}/{}",
+            self.instance, path
+        )))
     }
 }
 

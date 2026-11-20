@@ -270,6 +270,34 @@ mod tests {
         s.parse().unwrap()
     }
 
+    /// Rewrite a snapshot so its files sit under `base`, as two sessions do
+    /// when each names its first keyring the same thing.
+    fn with_paths(image: &[u8], base: &str) -> Vec<u8> {
+        let count = u32::from_le_bytes(image[11..15].try_into().unwrap());
+        let mut rest = &image[15..];
+        let mut out = image[..15].to_vec();
+        for _ in 0..count {
+            let path_len = u32::from_le_bytes(rest[..4].try_into().unwrap()) as usize;
+            rest = &rest[4..];
+            let path = std::str::from_utf8(&rest[..path_len]).unwrap();
+            rest = &rest[path_len..];
+            let data_len = u64::from_le_bytes(rest[..8].try_into().unwrap()) as usize;
+            let data = &rest[8..8 + data_len];
+            rest = &rest[8 + data_len..];
+
+            let path = if path.ends_with("-wal") {
+                format!("{base}-wal")
+            } else {
+                base.to_string()
+            };
+            out.extend_from_slice(&(path.len() as u32).to_le_bytes());
+            out.extend_from_slice(path.as_bytes());
+            out.extend_from_slice(&(data_len as u64).to_le_bytes());
+            out.extend_from_slice(data);
+        }
+        out
+    }
+
     #[test]
     fn cipher_param_parses() {
         assert_eq!(params("password=a").cipher, TursoCipher::Aegis256);
@@ -333,6 +361,79 @@ mod tests {
             Err(KeyRingError::AccessDenied { .. })
         ));
         assert!(TursoKeyring::from_bytes(b"not a snapshot", &p).is_err());
+    }
+
+    #[test]
+    fn a_snapshot_claiming_huge_counts_is_refused() {
+        use crate::keyring::turso_web::WebIo;
+
+        // Fifteen bytes used to size a HashMap from an unauthenticated count
+        // and abort the process on allocation failure.
+        let mut blob = b"CRYPTEX-IO".to_vec();
+        blob.push(1);
+        blob.extend_from_slice(&u32::MAX.to_le_bytes());
+        assert!(WebIo::restore(&blob).is_err());
+
+        // A count of two with no entries is malformed, not a panic.
+        let mut blob = b"CRYPTEX-IO".to_vec();
+        blob.push(1);
+        blob.extend_from_slice(&2u32.to_le_bytes());
+        assert!(WebIo::restore(&blob).is_err());
+    }
+
+    #[test]
+    fn two_ios_never_share_a_file_id() {
+        use crate::keyring::turso_web::WebIo;
+        use ::turso::core::IO;
+
+        // Turso looks open databases up by `file_id`. Two IOs holding the same
+        // path - an OPFS keyring named `cryptex-1` and an in-memory image - must
+        // not resolve to one database, or one keyring writes into the other.
+        let a = WebIo::in_memory();
+        let b = WebIo::in_memory();
+        assert_ne!(
+            a.file_id("cryptex-1.db3").unwrap(),
+            b.file_id("cryptex-1.db3").unwrap()
+        );
+        assert_eq!(
+            a.file_id("cryptex-1.db3").unwrap(),
+            a.file_id("cryptex-1.db3").unwrap()
+        );
+    }
+
+    #[test]
+    fn restored_images_do_not_reuse_the_recorded_path() {
+        // Turso keys its open databases by `file_id`, so two images recorded
+        // under one path used to share one open database: the second keyring
+        // read the first one's secrets and wrote into it.
+        let p = params("password=collide salt=1qaz2wsx3edc4rfv5tgb");
+
+        let mut first = TursoKeyring::in_memory(&p).unwrap();
+        first.set_secret("first", b"one").unwrap();
+        let image_a = first.export().unwrap();
+
+        let mut second = TursoKeyring::in_memory(&p).unwrap();
+        second.set_secret("second", b"two").unwrap();
+        let image_b = second.export().unwrap();
+
+        // Both images claim the same database path, as two page loads would
+        // when each named its first keyring the same thing.
+        let mut a = TursoKeyring::from_bytes(&with_paths(&image_a, "shared.db3"), &p).unwrap();
+        let mut b = TursoKeyring::from_bytes(&with_paths(&image_b, "shared.db3"), &p).unwrap();
+
+        assert_eq!(a.get_secret("first").unwrap().0, b"one");
+        assert_eq!(b.get_secret("second").unwrap().0, b"two");
+        assert!(matches!(
+            b.get_secret("first"),
+            Err(KeyRingError::ItemNotFound)
+        ));
+
+        // A write for one must not land in the other.
+        b.set_secret("later", b"kept").unwrap();
+        assert!(matches!(
+            a.get_secret("later"),
+            Err(KeyRingError::ItemNotFound)
+        ));
     }
 
     #[test]

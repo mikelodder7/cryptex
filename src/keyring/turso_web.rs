@@ -37,6 +37,12 @@ const SNAPSHOT_VERSION: u8 = 1;
 /// Files held by [`WebIo`], keyed by the path Turso opened them with.
 pub(crate) struct WebIo {
     files: Mutex<HashMap<String, Arc<WebFile>>>,
+    /// Distinguishes this IO in Turso's process-wide database registry.
+    ///
+    /// That registry is keyed by `file_id`, so two IOs holding a same-named
+    /// file would otherwise share one open database, including its encryption
+    /// key: one keyring would silently read and write the other's secrets.
+    instance: String,
 }
 
 impl WebIo {
@@ -44,6 +50,7 @@ impl WebIo {
     pub(crate) fn in_memory() -> Arc<Self> {
         Arc::new(Self {
             files: Mutex::new(HashMap::new()),
+            instance: new_instance(),
         })
     }
 
@@ -95,8 +102,18 @@ impl WebIo {
         rest = &rest[1..];
         let (count, tail) = take::<4>(rest).ok_or_else(malformed)?;
         rest = tail;
-        let mut files = HashMap::with_capacity(u32::from_le_bytes(count) as usize);
-        for _ in 0..u32::from_le_bytes(count) {
+        let count = u32::from_le_bytes(count);
+        // A database is the `.db3` file and the WAL beside it. A header
+        // claiming more is not a snapshot of ours, and sizing anything from it
+        // would let a fifteen-byte input ask for gigabytes.
+        if count > 2 {
+            return Err(malformed());
+        }
+        // Open the image under a path of its own: the one in the image was
+        // chosen in another session, where the same path may still be open.
+        let base = unique_db_path();
+        let mut files = HashMap::new();
+        for _ in 0..count {
             let (len, tail) = take::<4>(rest).ok_or_else(malformed)?;
             rest = tail;
             let path_len = u32::from_le_bytes(len) as usize;
@@ -114,10 +131,16 @@ impl WebIo {
             }
             let store = MemPages::from_vec(rest[..data_len].to_vec());
             rest = &rest[data_len..];
+            let path = if path.ends_with("-wal") {
+                format!("{base}-wal")
+            } else {
+                base.clone()
+            };
             files.insert(path, Arc::new(WebFile::new(store)));
         }
         Ok(Arc::new(Self {
             files: Mutex::new(files),
+            instance: new_instance(),
         }))
     }
 
@@ -127,14 +150,19 @@ impl WebIo {
 }
 
 /// A database path no other in-memory keyring uses.
-///
-/// Turso keys its open databases by path, so two in-memory keyrings that
-/// shared one would share a page cache and an encryption key.
 pub(crate) fn unique_db_path() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT: AtomicU64 = AtomicU64::new(1);
     format!("cryptex-{}.db3", NEXT.fetch_add(1, Ordering::Relaxed))
+}
+
+/// An IO id no other IO in this process has.
+pub(super) fn new_instance() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    format!("io-{}", NEXT.fetch_add(1, Ordering::Relaxed))
 }
 
 fn poisoned() -> KeyRingError {
@@ -187,7 +215,10 @@ impl IO for WebIo {
     }
 
     fn file_id(&self, path: &str) -> TursoResult<FileId> {
-        Ok(FileId::from_path_hash(path))
+        Ok(FileId::from_path_hash(&format!(
+            "{}/{}",
+            self.instance, path
+        )))
     }
 
     fn is_memory(&self) -> bool {
