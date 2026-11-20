@@ -152,7 +152,6 @@ macro_rules! file_keyring {
 #[cfg(any(
     feature = "file",
     feature = "encrypted-vfs",
-    feature = "turso",
     feature = "turso-encrypted-io",
     feature = "yubihsm-usb",
     feature = "yubihsm-http"

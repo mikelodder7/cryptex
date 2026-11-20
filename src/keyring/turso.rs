@@ -14,8 +14,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use zeroize::{Zeroize, Zeroizing};
 
-use super::file_common::{self, CipherParam, derive_key_32, file_keyring, secure_file};
-#[cfg(feature = "opfs")]
+use super::file_common::{self, CipherParam, derive_key_32, secure_file};
+#[cfg(feature = "turso-opfs")]
 use super::opfs::OpfsIo;
 use super::turso_common::TursoFile;
 use super::turso_web::{WebIo, unique_db_path};
@@ -90,21 +90,66 @@ pub use ::turso::core;
 /// - [`with_io`](Self::with_io) opens through a caller-supplied Turso `IO`,
 ///   such as the Origin Private File System in a browser worker.
 pub struct TursoKeyring {
-    file: TursoFile,
-    /// Set on keyrings whose database lives in memory, so it can be copied out.
-    web: Option<Arc<WebIo>>,
+    backing: Backing,
 }
 
-file_keyring!(TursoKeyring, file);
+/// Where a keyring's database lives.
+enum Backing {
+    /// A file, or a connection the caller owns, that outlives the keyring.
+    Stored(TursoFile),
+    /// A database cryptex made in memory, so it can be copied out as an image.
+    InMemory { file: TursoFile, io: Arc<WebIo> },
+}
+
+impl Backing {
+    fn file(&self) -> &TursoFile {
+        match self {
+            Self::Stored(file) | Self::InMemory { file, .. } => file,
+        }
+    }
+
+    fn into_file(self) -> TursoFile {
+        match self {
+            Self::Stored(file) | Self::InMemory { file, .. } => file,
+        }
+    }
+}
+
+impl DynKeyRing for TursoKeyring {
+    fn get_secret(&mut self, id: &str) -> Result<KeyRingSecret> {
+        file_common::SecretStore::get(self.file(), id)
+    }
+
+    fn set_secret(&mut self, id: &str, secret: &[u8]) -> Result<()> {
+        file_common::SecretStore::set(self.file(), id, secret)
+    }
+
+    fn delete_secret(&mut self, id: &str) -> Result<()> {
+        file_common::SecretStore::delete(self.file(), id)
+    }
+}
+
+impl NewKeyRing for TursoKeyring {
+    fn new<S: AsRef<str>>(lock_key: S) -> Result<Self> {
+        let params = lock_key.as_ref().parse::<ConnectionParams>()?;
+        Self::with_params(&params, None)
+    }
+}
 
 impl TursoKeyring {
+    fn file(&self) -> &TursoFile {
+        self.backing.file()
+    }
+
     /// Open (or create) the keyring in `path` (default `~/.cryptex`).
     pub fn with_params(connection: &ConnectionParams, path: Option<PathBuf>) -> Result<Self> {
         let file = TursoFile::open(path, builder(connection)?)?;
         if let Some(db_path) = file.db_path() {
             secure_file(db_path)?;
         }
-        Ok(Self { file, web: None })
+        Ok(Self {
+            backing: Backing::Stored(file),
+        })
     }
 
     /// Adopt an already-open Turso connection.
@@ -132,8 +177,7 @@ impl TursoKeyring {
     /// ```
     pub fn from_connection(conn: Connection) -> Result<Self> {
         Ok(Self {
-            file: TursoFile::adopt(conn)?,
-            web: None,
+            backing: Backing::Stored(TursoFile::adopt(conn)?),
         })
     }
 
@@ -149,8 +193,7 @@ impl TursoKeyring {
     /// sync access handle for the database.
     pub fn with_io(io: Arc<dyn core::IO>, path: &str, params: &ConnectionParams) -> Result<Self> {
         Ok(Self {
-            file: TursoFile::open_with(builder(params)?(path).with_io_impl(io))?,
-            web: None,
+            backing: Backing::Stored(Self::open_through(io, path, params)?),
         })
     }
 
@@ -162,7 +205,7 @@ impl TursoKeyring {
     pub fn in_memory(params: &ConnectionParams) -> Result<Self> {
         let io = WebIo::in_memory();
         let path = unique_db_path();
-        Self::open_web(Arc::clone(&io), &path, params).map(|k| Self { web: Some(io), ..k })
+        Self::open_web(io, &path, params)
     }
 
     /// Reopen a keyring from an image produced by [`export`](Self::export).
@@ -173,24 +216,37 @@ impl TursoKeyring {
         let path = io.db_path().ok_or_else(|| KeyRingError::AccessDenied {
             msg: "Invalid key or corrupted keyring image".to_string(),
         })?;
-        Self::open_web(Arc::clone(&io), &path, params).map(|k| Self { web: Some(io), ..k })
+        Self::open_web(io, &path, params)
     }
 
+    /// Open through an `IO` cryptex made, so the database can be copied out.
     fn open_web(io: Arc<WebIo>, path: &str, params: &ConnectionParams) -> Result<Self> {
-        let io: Arc<dyn core::IO> = io;
+        let handle = Arc::clone(&io);
         // The image was already parsed, so the only thing left that can refuse
         // the open is the key: an image written under another key looks like a
         // corrupt one. Report both the way [`MemoryKeyring::import`] does.
-        Self::with_io(io, path, params).map_err(|_| KeyRingError::AccessDenied {
-            msg: "Invalid key or corrupted keyring image".to_string(),
+        let file =
+            Self::open_through(handle, path, params).map_err(|_| KeyRingError::AccessDenied {
+                msg: "Invalid key or corrupted keyring image".to_string(),
+            })?;
+        Ok(Self {
+            backing: Backing::InMemory { file, io },
         })
+    }
+
+    fn open_through(
+        io: Arc<dyn core::IO>,
+        path: &str,
+        params: &ConnectionParams,
+    ) -> Result<TursoFile> {
+        TursoFile::open_with(builder(params)?(path).with_io_impl(io))
     }
 
     /// Open (or create) the keyring in the origin private file system.
     ///
     /// Only available in a browser worker: OPFS sync access handles exist
     /// nowhere else. The database and its WAL live under `cryptex/<name>.db3`.
-    #[cfg(feature = "opfs")]
+    #[cfg(feature = "turso-opfs")]
     pub async fn open_opfs(params: &ConnectionParams, name: &str) -> Result<Self> {
         let io: Arc<dyn core::IO> = Arc::new(OpfsIo::open(name).await?);
         let keyring = Self::with_io(io, &format!("{name}.db3"), params)?;
@@ -204,9 +260,8 @@ impl TursoKeyring {
     pub fn copy_under(&self, params: &ConnectionParams) -> Result<Self> {
         let io = WebIo::in_memory();
         let path = unique_db_path();
-        let mut copy = Self::open_web(Arc::clone(&io), &path, params)?;
-        copy.web = Some(io);
-        self.file.copy_into(&copy.file)?;
+        let copy = Self::open_web(io, &path, params)?;
+        self.file().copy_into(copy.file())?;
         Ok(copy)
     }
 
@@ -215,17 +270,17 @@ impl TursoKeyring {
     /// Fails for a keyring opened from a path or from a caller's connection:
     /// the caller owns that storage, so it owns copying it.
     pub fn export(&self) -> Result<Vec<u8>> {
-        self.web
-            .as_ref()
-            .ok_or_else(|| KeyRingError::GeneralError {
+        match &self.backing {
+            Backing::InMemory { io, .. } => io.snapshot(),
+            Backing::Stored(_) => Err(KeyRingError::GeneralError {
                 msg: "export is only available for an in-memory keyring".to_string(),
-            })?
-            .snapshot()
+            }),
+        }
     }
 
     /// Every id in the keyring, in order.
     pub fn keys(&self) -> Result<Vec<String>> {
-        self.file.ids()
+        self.file().ids()
     }
 
     /// Re-encrypt the keyring with a new key (and optionally a different cipher).
@@ -234,11 +289,13 @@ impl TursoKeyring {
     /// rekeying fails the original file is left intact and can be reopened
     /// with the old parameters.
     pub fn rekey(self, new_params: &ConnectionParams) -> Result<Self> {
-        let file = self.file.rekey(builder(new_params)?)?;
+        let file = self.backing.into_file().rekey(builder(new_params)?)?;
         if let Some(db_path) = file.db_path() {
             secure_file(db_path)?;
         }
-        Ok(Self { file, web: None })
+        Ok(Self {
+            backing: Backing::Stored(file),
+        })
     }
 }
 

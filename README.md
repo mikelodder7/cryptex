@@ -139,7 +139,7 @@ open. `rekey` re-derives the key without touching the secrets.
 | `turso-encrypted-io` | builds | yes | the page cipher needs a `PageStore`; the file-backed one is native only |
 | `web-storage` | yes | no | a `MemoryKeyring` sealed into `localStorage` |
 | `indexeddb` | yes | no | encrypted image snapshots, one per keyring |
-| `opfs` | yes | no | the database file itself in the origin private file system |
+| `turso-opfs` | yes | no | the database file itself in the origin private file system |
 | `js` | yes | no | the `wasm-bindgen` `Keyring` class |
 | `file`, `encrypted-vfs` | no | no | SQLCipher and the bundled C VFS are native only |
 | OS keyrings, `yubihsm-*` | no | no | no OS keychain or USB device |

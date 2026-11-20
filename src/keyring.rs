@@ -32,7 +32,7 @@ pub mod linux;
 pub mod macos;
 #[cfg(feature = "memory")]
 pub mod memory;
-#[cfg(feature = "opfs")]
+#[cfg(feature = "turso-opfs")]
 pub mod opfs;
 #[cfg(any(feature = "encrypted-vfs", feature = "turso-encrypted-io"))]
 mod page_cipher;
@@ -40,7 +40,7 @@ mod page_cipher;
     feature = "encrypted-vfs",
     feature = "turso",
     feature = "turso-encrypted-io",
-    feature = "opfs"
+    feature = "turso-opfs"
 ))]
 mod page_store;
 #[cfg(feature = "file")]
@@ -57,7 +57,7 @@ pub mod turso_encrypted_io;
 mod turso_web;
 #[cfg(feature = "web-storage")]
 pub mod web_storage;
-#[cfg(any(feature = "opfs", feature = "turso"))]
+#[cfg(any(feature = "turso-opfs", feature = "turso"))]
 mod web_time;
 #[cfg(all(target_os = "windows", feature = "windows-credentials"))]
 pub mod windows;
@@ -151,7 +151,7 @@ compile_error!("no keyring implementation is selected or available for this plat
 ))]
 compile_error!(
     "the file, encrypted-vfs, yubihsm and OS keyring backends are not available on wasm; \
-     use the memory, web-storage, indexeddb, opfs or turso features instead"
+     use the memory, web-storage, indexeddb, turso-opfs or turso features instead"
 );
 
 // Browser-only features asked for by a non-browser target.
@@ -160,11 +160,13 @@ compile_error!(
     any(
         feature = "web-storage",
         feature = "indexeddb",
-        feature = "opfs",
+        feature = "turso-opfs",
         feature = "js"
     )
 ))]
-compile_error!("the web-storage, indexeddb, opfs and js features require wasm32-unknown-unknown");
+compile_error!(
+    "the web-storage, indexeddb, turso-opfs and js features require wasm32-unknown-unknown"
+);
 
 #[cfg(any(
     all(target_os = "linux", feature = "linux-secret-service"),
