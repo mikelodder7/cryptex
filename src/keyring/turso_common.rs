@@ -77,7 +77,7 @@ impl Wake for SpinWaker {
 }
 
 #[cfg(target_family = "wasm")]
-fn block_on<F, T, E>(fut: F) -> Result<T>
+pub(crate) fn block_on<F, T, E>(fut: F) -> Result<T>
 where
     F: Future<Output = std::result::Result<T, E>>,
     E: Into<KeyRingError>,

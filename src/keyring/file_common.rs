@@ -402,6 +402,11 @@ pub(crate) fn derive_key_32<C: CipherParam>(
 pub(crate) fn get_keyring_file(in_path: Option<PathBuf>, file_name: &str) -> Result<PathBuf> {
     let mut path = match in_path {
         None => {
+            // WASI has no home directory, and `CARGO_MANIFEST_DIR` is the
+            // build machine's path, so keep the keyring next to the program.
+            #[cfg(target_os = "wasi")]
+            let mut path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            #[cfg(not(target_os = "wasi"))]
             let mut path = dirs::home_dir().unwrap_or_else(|| {
                 dirs::document_dir().unwrap_or_else(|| {
                     dirs::data_local_dir()
@@ -493,6 +498,9 @@ pub(crate) fn acquire_single_opener_lock(db_path: &Path) -> Result<File> {
         Err(TryLockError::WouldBlock) => Err(KeyRingError::AccessDenied {
             msg: "keyring is already open by another process".to_string(),
         }),
+        // WASI and some network filesystems do not implement locking; a
+        // keyring there relies on the caller keeping a single writer.
+        Err(TryLockError::Error(e)) if e.kind() == std::io::ErrorKind::Unsupported => Ok(file),
         Err(TryLockError::Error(e)) => Err(KeyRingError::GeneralError {
             msg: format!("unable to lock keyring: {}", e),
         }),
@@ -773,6 +781,11 @@ pub(crate) mod test_support {
 
     impl TestDir {
         pub(crate) fn new(name: &str) -> Self {
+            // Under WASI only the preopened directory is reachable, so use a
+            // path relative to it.
+            #[cfg(target_os = "wasi")]
+            let path = PathBuf::from(name);
+            #[cfg(not(target_os = "wasi"))]
             let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(name);
             let _ = std::fs::remove_dir_all(&path);
             Self(path)

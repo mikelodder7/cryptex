@@ -100,6 +100,91 @@ CRYPTEX_ARGON2_MEMORY=32768 CRYPTEX_ARGON2_THREADS=3 CRYPTEX_ARGON2_PARALLEL=2 c
 
 The program can be compiled from any OS to run on any OS. Cryptex-CLI is the command line tool while Cryptex is the library.
 
+### In-memory keyrings
+
+The `memory` feature adds `MemoryKeyring`, which keeps its secrets in RAM and
+never writes a file. It builds for every target, including wasm. Secrets leave
+memory only as a single AEAD-sealed blob:
+
+```rust
+use cryptex::KeyRing;
+use cryptex::memory::{ConnectionParams, MemoryKeyring};
+
+let params: ConnectionParams =
+    "password=<password> salt=<salt value>".parse().unwrap();
+let mut keyring = MemoryKeyring::with_params(&params)?;
+keyring.set_secret("token", b"secret value")?;
+
+// Persist this anywhere you like; it is sealed with a fresh nonce.
+let blob = keyring.export()?;
+// The salt, cipher and Argon2 parameters travel inside the blob.
+let mut reopened = MemoryKeyring::import(&blob, b"<password>")?;
+# Ok::<(), cryptex::KeyRingError>(())
+```
+
+A blob made from `key=<hex>` instead of a password needs that same raw key to
+open. `rekey` re-derives the key without touching the secrets.
+
+---
+
+## WebAssembly and WASI
+
+`cryptex` builds for `wasm32-unknown-unknown` and for `wasm32-wasip1` /
+`wasm32-wasip2`. Which backends exist there:
+
+| Feature | `wasm32-unknown-unknown` | WASI | Notes |
+|---------|--------------------------|------|-------|
+| `memory` | yes | yes | encrypted in RAM, export/import |
+| `turso` | yes | yes | Turso's native page encryption |
+| `turso-encrypted-io` | yes | yes | page cipher in a custom IO |
+| `file`, `encrypted-vfs` | no | no | SQLCipher and the bundled C VFS are native only |
+| OS keyrings, `yubihsm-*` | no | no | no OS keychain or USB device |
+
+Asking for an unsupported backend on wasm is a compile error that names the
+problem, rather than a linker failure.
+
+`getrandom` needs its Web Crypto backend on `wasm32-unknown-unknown`. The
+repository's `.cargo/config.toml` sets it, and a CI job that overrides
+`RUSTFLAGS` must repeat it:
+
+```bash
+RUSTFLAGS='--cfg getrandom_backend="wasm_js"' \
+  cargo check --target wasm32-unknown-unknown --no-default-features --features turso
+```
+
+### Bringing your own storage
+
+`TursoKeyring` can adopt a connection you opened, or open through an IO you
+supply, so one database can hold the keyring's `secrets` table and your own
+tables under a single key:
+
+```rust
+use cryptex::turso::TursoKeyring;
+
+// A connection opened by the caller, e.g. with a custom IO and encryption.
+let keyring = TursoKeyring::from_connection(conn)?;
+
+// Or let cryptex build the database through your IO (such as OPFS).
+let keyring = TursoKeyring::with_io(io, "keyring.db3", &params)?;
+# Ok::<(), cryptex::KeyRingError>(())
+```
+
+In both cases cryptex creates and owns only its own tables, and `rekey` reports
+an error because cryptex does not own that storage: copy the secrets into a
+keyring that owns its file instead. `cryptex::turso` re-exports `Connection`,
+`TursoBuilder` and `core` so callers construct matching types.
+
+Turso's synchronous API is driven on the current thread. Native builds park the
+thread while a future is pending; wasm builds poll a bounded number of times
+and return an error instead of spinning, so an IO backend must complete its
+reads in place.
+
+On WASI there is no file locking: `try_lock` reports `Unsupported`, which the
+keyring treats as success, and the default keyring directory is `./.cryptex`
+because there is no home directory. Keep a single writer per database there.
+
+The CLI is native only: a wasm binary prints that and exits.
+
 ---
 
 ## KMS/HSM Backends

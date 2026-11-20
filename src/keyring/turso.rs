@@ -237,6 +237,9 @@ mod tests {
         {
             let mut kr = TursoKeyring::with_params(&correct, dir.keyring_dir()).unwrap();
             kr.set_secret("x", b"secret").unwrap();
+            // WASI has no file locking, so a second opener is not refused
+            // there; callers keep a single writer instead.
+            #[cfg(not(target_os = "wasi"))]
             assert!(matches!(
                 TursoKeyring::with_params(&correct, dir.keyring_dir()),
                 Err(KeyRingError::AccessDenied { .. })

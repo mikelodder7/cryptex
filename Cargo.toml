@@ -86,11 +86,12 @@ whoami = "2.1.2"
 yubihsm = { version = "0.42", default-features = false, optional = true }
 zeroize = { version = "1.9.0", features = ["zeroize_derive"] }
 
-[dev-dependencies]
-criterion = { version = "0.8", features = ["html_reports"] }
-
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 rpassword = "7.5.4"
+
+# Criterion pulls in Rayon, which does not build for wasm.
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+criterion = { version = "0.8", features = ["html_reports"] }
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 getrandom = { version = "0.4.3", features = ["wasm_js"], optional = true }
