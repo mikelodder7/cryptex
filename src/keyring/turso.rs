@@ -18,7 +18,7 @@ use super::file_common::{self, CipherParam, derive_key_32, file_keyring, secure_
 use super::turso_common::TursoFile;
 #[cfg(feature = "opfs")]
 use super::opfs::OpfsIo;
-use super::turso_web::WebIo;
+use super::turso_web::{WebIo, unique_db_path};
 use crate::error::KeyRingError;
 
 /// The cipher Turso uses to encrypt database pages.
@@ -161,13 +161,19 @@ impl TursoKeyring {
     /// with [`from_bytes`](Self::from_bytes).
     pub fn in_memory(params: &ConnectionParams) -> Result<Self> {
         let io = WebIo::in_memory();
-        Self::open_web(Arc::clone(&io), "cryptex.db3", params).map(|k| Self { web: Some(io), ..k })
+        let path = unique_db_path();
+        Self::open_web(Arc::clone(&io), &path, params).map(|k| Self { web: Some(io), ..k })
     }
 
     /// Reopen a keyring from an image produced by [`export`](Self::export).
     pub fn from_bytes(bytes: &[u8], params: &ConnectionParams) -> Result<Self> {
         let io = WebIo::restore(bytes)?;
-        Self::open_web(Arc::clone(&io), "cryptex.db3", params).map(|k| Self { web: Some(io), ..k })
+        // The image remembers the path it was written under; Turso keys open
+        // databases by path, so it has to be opened as that path.
+        let path = io.db_path().ok_or_else(|| KeyRingError::AccessDenied {
+            msg: "Invalid key or corrupted keyring image".to_string(),
+        })?;
+        Self::open_web(Arc::clone(&io), &path, params).map(|k| Self { web: Some(io), ..k })
     }
 
     fn open_web(io: Arc<WebIo>, path: &str, params: &ConnectionParams) -> Result<Self> {
@@ -197,7 +203,8 @@ impl TursoKeyring {
     /// nothing. This is how a keyring without a file of its own is rekeyed.
     pub fn copy_under(&self, params: &ConnectionParams) -> Result<Self> {
         let io = WebIo::in_memory();
-        let mut copy = Self::open_web(Arc::clone(&io), "cryptex.db3", params)?;
+        let path = unique_db_path();
+        let mut copy = Self::open_web(Arc::clone(&io), &path, params)?;
         copy.web = Some(io);
         self.file.copy_into(&copy.file)?;
         Ok(copy)
@@ -320,6 +327,26 @@ mod tests {
             Err(KeyRingError::AccessDenied { .. })
         ));
         assert!(TursoKeyring::from_bytes(b"not a snapshot", &p).is_err());
+    }
+
+    #[test]
+    fn copy_under_rekeys_without_touching_the_original() {
+        let a = params("password=first salt=1qaz2wsx3edc4rfv5tgb");
+        let b = params("password=second salt=1qaz2wsx3edc4rfv5tgb");
+        let wrong = params("password=third salt=1qaz2wsx3edc4rfv5tgb");
+
+        let mut original = TursoKeyring::in_memory(&a).unwrap();
+        original.set_secret("k1", b"value1").unwrap();
+
+        let copy = original.copy_under(&b).unwrap();
+        let image = copy.export().unwrap();
+
+        let mut reopened = TursoKeyring::from_bytes(&image, &b).unwrap();
+        assert_eq!(reopened.get_secret("k1").unwrap().0, b"value1");
+        assert!(TursoKeyring::from_bytes(&image, &wrong).is_err());
+
+        // The original still opens with its own key.
+        assert_eq!(original.get_secret("k1").unwrap().0, b"value1");
     }
 
     #[test]

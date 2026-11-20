@@ -209,7 +209,8 @@ impl Drop for LockHold {
 }
 
 async fn open_db() -> Result<IdbDatabase> {
-    let factory: IdbFactory = Reflect::get(&navigator()?, &JsValue::from_str("indexedDB"))
+    // `indexedDB` hangs off the global object, not off `navigator`.
+    let factory: IdbFactory = Reflect::get(&js_sys::global(), &JsValue::from_str("indexedDB"))
         .map_err(js_error)?
         .dyn_into()
         .map_err(|_| unsupported("this browser has no IndexedDB"))?;

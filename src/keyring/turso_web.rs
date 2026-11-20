@@ -47,6 +47,15 @@ impl WebIo {
         })
     }
 
+    /// The path of the database file in this IO, if it has one.
+    pub(crate) fn db_path(&self) -> Option<String> {
+        let files = self.files.lock().ok()?;
+        files
+            .keys()
+            .find(|path| path.ends_with(".db3"))
+            .cloned()
+    }
+
     /// Copy every file into one blob.
     ///
     /// Layout: `magic (10) | version (1) | count (u32 LE)` then, per file in
@@ -118,6 +127,17 @@ impl WebIo {
     fn files(&self) -> Result<MutexGuard<'_, HashMap<String, Arc<WebFile>>>> {
         self.files.lock().map_err(|_| poisoned())
     }
+}
+
+/// A database path no other in-memory keyring uses.
+///
+/// Turso keys its open databases by path, so two in-memory keyrings that
+/// shared one would share a page cache and an encryption key.
+pub(crate) fn unique_db_path() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    format!("cryptex-{}.db3", NEXT.fetch_add(1, Ordering::Relaxed))
 }
 
 fn poisoned() -> KeyRingError {

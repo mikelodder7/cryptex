@@ -63,7 +63,9 @@ pub struct Keyring {
 enum Inner {
     /// A Turso keyring plus the store its image is written to.
     Turso {
-        keyring: TursoKeyring,
+        /// `None` once the keyring is closed: dropping it releases the
+        /// database, and with it an OPFS handle or an IndexedDB lock.
+        keyring: Option<TursoKeyring>,
         store: Store,
         dirty: bool,
     },
@@ -115,7 +117,7 @@ impl Keyring {
                     .map_err(js)?;
                 Ok(Keyring {
                     inner: Inner::Turso {
-                        keyring,
+                        keyring: Some(keyring),
                         store: Store::None,
                         dirty: false,
                     },
@@ -134,7 +136,9 @@ impl Keyring {
     /// Read a secret. Throws `ItemNotFound` when there is none.
     pub fn get(&mut self, id: &str) -> Result<Vec<u8>, JsError> {
         let secret = match &mut self.inner {
-            Inner::Turso { keyring, .. } => keyring.get_secret(id),
+            Inner::Turso { keyring, .. } => {
+                keyring.as_mut().ok_or_else(closed)?.get_secret(id)
+            }
             Inner::Memory(keyring) => keyring.get_secret(id),
             Inner::WebStorage(keyring) => keyring.get_secret(id),
         }
@@ -154,6 +158,7 @@ impl Keyring {
                 store,
                 dirty,
             } => {
+                let keyring = keyring.as_mut().ok_or_else(closed)?;
                 keyring.set_secret(id, secret).map_err(js)?;
                 *dirty = true;
                 flush(keyring, store, dirty).await
@@ -171,6 +176,7 @@ impl Keyring {
                 store,
                 dirty,
             } => {
+                let keyring = keyring.as_mut().ok_or_else(closed)?;
                 keyring.delete_secret(id).map_err(js)?;
                 *dirty = true;
                 flush(keyring, store, dirty).await
@@ -199,6 +205,7 @@ impl Keyring {
                     ));
                 }
                 let params = turso_params(connection)?;
+                let keyring = keyring.as_mut().ok_or_else(closed)?;
                 // Build the replacement first: if it fails, the keyring the
                 // caller holds is untouched.
                 let rekeyed = keyring.copy_under(&params).map_err(js)?;
@@ -214,7 +221,9 @@ impl Keyring {
     /// Copy the encrypted image out, e.g. to move it to another store.
     pub fn export(&self) -> Result<Vec<u8>, JsError> {
         match &self.inner {
-            Inner::Turso { keyring, .. } => keyring.export().map_err(js),
+            Inner::Turso { keyring, .. } => {
+                keyring.as_ref().ok_or_else(closed)?.export().map_err(js)
+            }
             Inner::Memory(keyring) => keyring.export().map_err(js),
             Inner::WebStorage(keyring) => keyring.export().map_err(js),
         }
@@ -232,7 +241,10 @@ impl Keyring {
             dirty,
         } = &mut self.inner
         {
-            flush(keyring, store, dirty).await?;
+            if let Some(keyring) = keyring.as_ref() {
+                flush(keyring, store, dirty).await?;
+            }
+            *keyring = None;
             *store = Store::None;
         }
         Ok(())
@@ -276,7 +288,7 @@ async fn open_turso(connection: &str, name: &str, store: StoreKind) -> Result<Ke
     };
     Ok(Keyring {
         inner: Inner::Turso {
-            keyring,
+            keyring: Some(keyring),
             store,
             dirty: false,
         },
@@ -305,11 +317,15 @@ async fn flush(keyring: &TursoKeyring, store: &Store, dirty: &mut bool) -> Resul
     if !*dirty {
         return Ok(());
     }
-    let image = keyring.export().map_err(js)?;
     match store {
+        // OPFS holds the database file itself: Turso's own writes are the
+        // persistence, so there is no image to copy out.
         Store::None | Store::Opfs => {}
-        Store::IndexedDb(snapshot) => snapshot.save(&image).await.map_err(js)?,
-        Store::LocalStorage(local) => local.save(&image)?,
+        Store::IndexedDb(snapshot) => snapshot
+            .save(&keyring.export().map_err(js)?)
+            .await
+            .map_err(js)?,
+        Store::LocalStorage(local) => local.save(&keyring.export().map_err(js)?)?,
     }
     *dirty = false;
     Ok(())
@@ -403,6 +419,10 @@ fn memory_secret(connection: &str) -> Result<Vec<u8>, JsError> {
     } else {
         params.key.clone()
     })
+}
+
+fn closed() -> JsError {
+    JsError::new("GeneralError: the keyring is closed")
 }
 
 fn js(error: KeyRingError) -> JsError {
