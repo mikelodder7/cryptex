@@ -203,11 +203,14 @@ Every store keeps the data encrypted; the key comes from the password (or raw
 key) in the connection string, so a store with the wrong connection string
 fails with `AccessDenied` instead of returning garbage.
 
-A `set` or `delete` that resolves has reached the store. An IndexedDB keyring
-also holds a Web Lock named after itself, so a second tab that opens the same
-name fails with `AccessDenied` instead of overwriting the first tab's secrets;
-`close()` releases the lock, and with OPFS the sync access handle, so close a
-keyring before opening it again in the same context.
+A `set` or `delete` that resolves has reached the store, and every call on a
+closed keyring throws. An IndexedDB or localStorage keyring also holds a Web
+Lock named after itself, so a second tab that opens the same name fails with
+`AccessDenied` instead of overwriting the first tab's secrets; `close()`
+releases the lock, and with OPFS the sync access handle, so close a keyring
+before opening it again in the same context. The Rust-level
+`WebStorageKeyring` does not take that lock: it is synchronous by design, and
+taking a lock is not.
 
 OPFS needs `createSyncAccessHandle()`, which browsers expose only in a
 dedicated worker, so `store: "opfs"` is refused on the main thread. A worker
@@ -226,6 +229,20 @@ origins and other users, not against a compromised page.
 refuse, and clearing site data always removes it. Key derivation runs Argon2,
 which blocks the thread it runs on: with a large `memory=` value, open the
 keyring in a worker or the page freezes until it finishes.
+
+What the encryption does not detect is a *stale* image. Code that can write
+origin storage can put back an earlier one, or drop the `-wal` beside it, and
+the keyring opens with the secrets it held then; a rotated secret can come
+back that way. Keep a version or counter of your own outside the store if that
+matters.
+
+The password reaches the library through the connection string, which is a
+small DSL: `\` starts an escape, a leading `'` quotes a value, and whitespace
+separates entries. A password containing those characters is not passed
+through unchanged, so derive a key yourself or hex-encode the secret when the
+password is user-supplied. A repeated keyword (`password=a password=b`) is an
+error rather than a silent override. The examples use one fixed salt to stay
+readable; an application should give each keyring a salt of its own.
 
 ### Bringing your own storage
 
