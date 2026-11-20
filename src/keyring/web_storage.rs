@@ -43,11 +43,59 @@ pub type ConnectionParams = file_common::ConnectionParams<CipherAlgorithm>;
 /// `localStorage` key used when no name is given.
 pub const DEFAULT_NAME: &str = "cryptex";
 
+/// The encrypted image of a keyring, kept in one `localStorage` entry.
+///
+/// The image is the same blob [`MemoryKeyring::export`] and
+/// [`TursoKeyring::export`](crate::turso::TursoKeyring::export) produce, so a
+/// Turso keyring can use this store too.
+pub struct LocalStorageImage {
+    entry: String,
+}
+
+impl LocalStorageImage {
+    /// Name the entry for a keyring called `name` (default [`DEFAULT_NAME`]).
+    pub fn new(name: Option<&str>) -> Result<Self> {
+        Ok(Self {
+            entry: entry_name(name),
+        })
+    }
+
+    /// The `localStorage` key this image is stored under.
+    pub fn entry(&self) -> &str {
+        &self.entry
+    }
+
+    /// Read the stored image, if there is one.
+    pub fn load(&self) -> Result<Option<Vec<u8>>> {
+        let storage = storage()?;
+        match storage.get_item(&self.entry).map_err(js_error)? {
+            Some(encoded) => hex::decode(encoded).map(Some).map_err(|_| invalid_blob()),
+            None => Ok(None),
+        }
+    }
+
+    /// Write an image, replacing any previous one.
+    pub fn save(&self, image: &[u8]) -> Result<()> {
+        storage()?
+            .set_item(&self.entry, &hex::encode(image))
+            .map_err(|e| match js_error(e) {
+                KeyRingError::GeneralError { msg } => KeyRingError::GeneralError {
+                    msg: format!("unable to store the keyring in localStorage: {msg}"),
+                },
+                other => other,
+            })
+    }
+
+    /// Remove the stored image.
+    pub fn delete(&self) -> Result<()> {
+        storage()?.remove_item(&self.entry).map_err(js_error)
+    }
+}
+
 /// A keyring whose image lives in `localStorage`.
 pub struct WebStorageKeyring {
     inner: MemoryKeyring,
-    /// `localStorage` key holding the image.
-    entry: String,
+    image: LocalStorageImage,
 }
 
 impl WebStorageKeyring {
@@ -57,21 +105,17 @@ impl WebStorageKeyring {
     /// A stored image is decrypted with the password or key in `params`; a
     /// wrong one returns [`KeyRingError::AccessDenied`].
     pub fn with_params(params: &ConnectionParams, name: Option<&str>) -> Result<Self> {
-        let entry = entry_name(name);
-        let storage = storage()?;
-        let inner = match storage.get_item(&entry).map_err(js_error)? {
-            Some(encoded) => {
-                let blob = hex::decode(encoded).map_err(|_| invalid_blob())?;
-                MemoryKeyring::import(&blob, password_or_key(params))
-            }
+        let image = LocalStorageImage::new(name)?;
+        let inner = match image.load()? {
+            Some(blob) => MemoryKeyring::import(&blob, password_or_key(params)),
             None => MemoryKeyring::with_params(params),
         }?;
-        Ok(Self { inner, entry })
+        Ok(Self { inner, image })
     }
 
     /// The `localStorage` key this keyring is stored under.
     pub fn entry(&self) -> &str {
-        &self.entry
+        self.image.entry()
     }
 
     /// Copy the encrypted image out, e.g. to move it to another backend.
@@ -92,19 +136,11 @@ impl WebStorageKeyring {
 
     /// Remove the stored image, leaving this keyring's contents in memory.
     pub fn forget(&self) -> Result<()> {
-        storage()?.remove_item(&self.entry).map_err(js_error)
+        self.image.delete()
     }
 
     fn persist(&self) -> Result<()> {
-        let image = self.inner.export()?;
-        storage()?
-            .set_item(&self.entry, &hex::encode(image))
-            .map_err(|e| match js_error(e) {
-                KeyRingError::GeneralError { msg } => KeyRingError::GeneralError {
-                    msg: format!("unable to store the keyring in localStorage: {msg}"),
-                },
-                other => other,
-            })
+        self.image.save(&self.inner.export()?)
     }
 }
 

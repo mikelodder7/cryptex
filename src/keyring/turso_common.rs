@@ -249,6 +249,11 @@ impl TursoFile {
         })
     }
 
+    /// Copy every secret into another keyring's store.
+    pub(crate) fn copy_into(&self, dst: &TursoFile) -> Result<()> {
+        self.store.copy_into(&dst.store)
+    }
+
     /// Path of the main database file, when cryptex opened it itself.
     #[cfg(feature = "turso")]
     pub(crate) fn db_path(&self) -> Option<&Path> {

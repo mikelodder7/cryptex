@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>cryptex in the browser</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: system-ui, sans-serif;
+      }
+      body {
+        margin: 0 auto;
+        max-width: 42rem;
+        padding: 2rem 1rem;
+        line-height: 1.5;
+      }
+      h1 {
+        font-size: 1.4rem;
+      }
+      fieldset {
+        border: 1px solid currentColor;
+        border-radius: 0.5rem;
+        margin-bottom: 1rem;
+        padding: 0.75rem 1rem;
+      }
+      label {
+        display: block;
+        margin: 0.5rem 0 0.25rem;
+      }
+      input,
+      button {
+        font: inherit;
+        padding: 0.35rem 0.5rem;
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+      }
+      button {
+        margin: 0.5rem 0.25rem 0 0;
+        cursor: pointer;
+      }
+      #status {
+        white-space: pre-wrap;
+        font-family: ui-monospace, monospace;
+        font-size: 0.9rem;
+        border-left: 3px solid currentColor;
+        padding-left: 0.75rem;
+        min-height: 1.5em;
+      }
+      .hint {
+        font-size: 0.85rem;
+        opacity: 0.75;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>cryptex in the browser</h1>
+    <p class="hint">
+      The keyring is a Turso database kept in IndexedDB. Everything you store is
+      encrypted with a key derived from the password; any script on this origin
+      can read the ciphertext, so pick a password you would not reuse
+      carelessly.
+    </p>
+
+    <fieldset>
+      <legend>Keyring</legend>
+      <label for="password">Password</label>
+      <input id="password" type="password" value="correct horse battery staple" autocomplete="off" />
+      <label for="name">Name</label>
+      <input id="name" type="text" value="example" autocomplete="off" />
+      <button id="open">Open</button>
+      <button id="persist">Ask for persistent storage</button>
+    </fieldset>
+
+    <fieldset>
+      <legend>Secret</legend>
+      <label for="id">Name</label>
+      <input id="id" type="text" value="api-token" autocomplete="off" />
+      <label for="value">Value</label>
+      <input id="value" type="text" value="s3cret" autocomplete="off" />
+      <button id="set">Store</button>
+      <button id="get">Read</button>
+      <button id="delete">Delete</button>
+      <button id="export">Copy image</button>
+    </fieldset>
+
+    <p id="status">Not opened.</p>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

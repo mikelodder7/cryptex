@@ -55,7 +55,10 @@ indexeddb = ["memory", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futu
 opfs = ["memory", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys"]
 js = [
     "memory",
+    "web-storage",
     "indexeddb",
+    "opfs",
+    "turso",
     "dep:web-sys",
     "dep:wasm-bindgen",
     "dep:wasm-bindgen-futures",

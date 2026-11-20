@@ -191,6 +191,18 @@ impl TursoKeyring {
         Ok(keyring)
     }
 
+    /// Copy every secret into a new in-memory keyring under `params`.
+    ///
+    /// The caller's keyring is left untouched, so a failed rekey changes
+    /// nothing. This is how a keyring without a file of its own is rekeyed.
+    pub fn copy_under(&self, params: &ConnectionParams) -> Result<Self> {
+        let io = WebIo::in_memory();
+        let mut copy = Self::open_web(Arc::clone(&io), "cryptex.db3", params)?;
+        copy.web = Some(io);
+        self.file.copy_into(&copy.file)?;
+        Ok(copy)
+    }
+
     /// Copy the whole in-memory database into one encrypted blob.
     ///
     /// Fails for a keyring opened from a path or from a caller's connection:

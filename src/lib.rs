@@ -57,6 +57,9 @@ pub use keyring::indexeddb;
 pub use keyring::memory;
 #[cfg(feature = "web-storage")]
 pub use keyring::web_storage;
+
+#[cfg(feature = "js")]
+mod wasm;
 #[cfg(feature = "file")]
 #[cfg_attr(docsrs, doc(cfg(feature = "file")))]
 pub use keyring::sqlcipher;
