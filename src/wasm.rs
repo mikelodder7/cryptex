@@ -246,6 +246,14 @@ impl Keyring {
         }
     }
 
+    /// Every id in this keyring, in order.
+    pub fn keys(&self) -> Result<Vec<String>, JsError> {
+        match &self.inner {
+            Inner::Turso { keyring, .. } => keyring.as_ref().ok_or_else(closed)?.keys().map_err(js),
+            Inner::Memory { keyring, .. } => Ok(keyring.keys()),
+        }
+    }
+
     /// Copy the encrypted image out, e.g. to move it to another store.
     pub fn export(&self) -> Result<Vec<u8>, JsError> {
         match &self.inner {
@@ -296,6 +304,15 @@ impl Keyring {
 #[wasm_bindgen(js_name = "requestPersistentStorage")]
 pub async fn request_persistent_storage() -> Result<bool, JsError> {
     web_storage::request_persistent_storage().await.map_err(js)
+}
+
+/// Every keyring IndexedDB holds for this origin, in name order.
+///
+/// Works without opening anything, so a page can list what is stored before
+/// the user picks one.
+#[wasm_bindgen(js_name = "storedKeyrings")]
+pub async fn stored_keyrings() -> Result<Vec<String>, JsError> {
+    SnapshotStore::list_names().await.map_err(js)
 }
 
 async fn open_turso(connection: &str, name: &str, store: StoreKind) -> Result<Keyring, JsError> {

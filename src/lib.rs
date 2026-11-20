@@ -84,7 +84,7 @@ pub use keyring::yubihsm;
 pub use keyring::*;
 #[cfg(feature = "js")]
 #[cfg_attr(docsrs, doc(cfg(feature = "js")))]
-pub use wasm::{Keyring, request_persistent_storage};
+pub use wasm::{Keyring, request_persistent_storage, stored_keyrings};
 
 #[cfg(any(
     all(target_os = "macos", feature = "macos-keychain"),

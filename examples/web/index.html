@@ -53,6 +53,29 @@
         font-size: 0.85rem;
         opacity: 0.75;
       }
+      .list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        font-family: ui-monospace, monospace;
+        font-size: 0.9rem;
+      }
+      .list li {
+        padding: 0.15rem 0;
+      }
+      .list .open {
+        opacity: 0.75;
+      }
+      button.link {
+        background: none;
+        border: none;
+        margin: 0;
+        padding: 0;
+        font: inherit;
+        color: inherit;
+        text-decoration: underline;
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
@@ -84,6 +107,20 @@
       <button id="get">Read</button>
       <button id="delete">Delete</button>
       <button id="export">Copy image</button>
+    </fieldset>
+
+    <fieldset>
+      <legend>Keyrings in this browser</legend>
+      <ul id="keyrings" class="list">
+        <li class="hint">Loading…</li>
+      </ul>
+    </fieldset>
+
+    <fieldset>
+      <legend>Keys in the open keyring</legend>
+      <ul id="keys" class="list">
+        <li class="hint">Open a keyring to see its keys.</li>
+      </ul>
     </fieldset>
 
     <p id="status">Not opened.</p>

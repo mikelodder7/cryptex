@@ -223,6 +223,11 @@ impl TursoKeyring {
             .snapshot()
     }
 
+    /// Every id in the keyring, in order.
+    pub fn keys(&self) -> Result<Vec<String>> {
+        self.file.ids()
+    }
+
     /// Re-encrypt the keyring with a new key (and optionally a different cipher).
     ///
     /// Consumes the keyring and returns it reopened under `new_params`. If
@@ -321,6 +326,7 @@ mod tests {
         let mut restored = TursoKeyring::from_bytes(&image, &p).unwrap();
         assert_eq!(restored.get_secret("k1").unwrap().0, b"value1");
         assert_eq!(restored.get_secret("shared").unwrap().0, b"kept");
+        assert_eq!(restored.keys().unwrap(), ["k1", "shared"]);
 
         assert!(matches!(
             TursoKeyring::from_bytes(&image, &wrong),

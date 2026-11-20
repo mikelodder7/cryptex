@@ -72,6 +72,8 @@ pub(crate) const UPSERT_SECRET_SQL: &str = "INSERT INTO secrets(id, value) VALUE
     feature = "turso-encrypted-io"
 ))]
 pub(crate) const DELETE_SECRET_SQL: &str = "DELETE FROM secrets WHERE id = ?1";
+#[cfg(any(feature = "turso", feature = "turso-encrypted-io"))]
+pub(crate) const SELECT_IDS_SQL: &str = "SELECT id FROM secrets ORDER BY id";
 
 #[cfg(any(
     feature = "file",

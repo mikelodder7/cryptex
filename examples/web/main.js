@@ -5,14 +5,87 @@
 // Then serve this directory over http (not file://):
 //   python3 -m http.server -d examples/web 8080
 
-import init, { Keyring, requestPersistentStorage } from "./pkg/cryptex.js";
+import init, {
+  Keyring,
+  requestPersistentStorage,
+  storedKeyrings,
+} from "./pkg/cryptex.js";
 
 const $ = (id) => document.getElementById(id);
+const decoder = new TextDecoder();
 
 let keyring = null;
 
 function show(message) {
   $("status").textContent = message;
+}
+
+function render(list, empty, rows) {
+  list.replaceChildren();
+  if (!rows.length) {
+    const item = document.createElement("li");
+    item.className = "hint";
+    item.textContent = empty;
+    list.append(item);
+    return;
+  }
+  list.append(...rows);
+}
+
+/** One entry per keyring in IndexedDB; clicking it opens that keyring. */
+function keyringRow(name) {
+  const item = document.createElement("li");
+  const button = document.createElement("button");
+  button.className = "link";
+  button.textContent = name;
+  button.addEventListener("click", () =>
+    guarded(async () => {
+      $("name").value = name;
+      await open();
+      await refresh();
+    }),
+  );
+  item.append(button);
+  if (keyring && name === $("name").value) {
+    const open = document.createElement("span");
+    open.className = "open";
+    open.textContent = "  (open)";
+    item.append(open);
+  }
+  return item;
+}
+
+/** One entry per key in the open keyring, with its value. */
+function keyRow(id) {
+  const item = document.createElement("li");
+  const name = document.createElement("code");
+  name.textContent = id;
+  const value = document.createElement("span");
+  try {
+    value.textContent = ` = ${decoder.decode(keyring.get(id))}`;
+  } catch (error) {
+    value.textContent = ` (${error.message})`;
+  }
+  item.append(name, value);
+  return item;
+}
+
+async function refreshKeyrings() {
+  const names = await storedKeyrings();
+  render($("keyrings"), "None stored yet.", names.map(keyringRow));
+}
+
+async function refreshKeys() {
+  if (!keyring) {
+    render($("keys"), "Open a keyring to see its keys.", []);
+    return;
+  }
+  render($("keys"), "This keyring holds no keys.", keyring.keys().map(keyRow));
+}
+
+async function refresh() {
+  await refreshKeyrings();
+  await refreshKeys();
 }
 
 /** Connection strings are `password=... salt=...`. */
@@ -48,18 +121,9 @@ async function guarded(action) {
 $("open").addEventListener("click", () =>
   guarded(async () => {
     await open();
-    const ids = [];
-    // Reading a secret that is not there is an error, not an empty value.
-    for (const id of ["api-token"]) {
-      try {
-        keyring.get(id);
-        ids.push(id);
-      } catch (error) {
-        // `String(error)` would prepend "Error: "; the kind is in `message`.
-        if (!error.message.startsWith("ItemNotFound")) throw error;
-      }
-    }
-    if (ids.length) show(`Opened "${$("name").value}"; it holds ${ids.join(", ")}.`);
+    await refresh();
+    const count = keyring.keys().length;
+    show(`Opened "${$("name").value}"; it holds ${count} key${count === 1 ? "" : "s"}.`);
   }),
 );
 
@@ -79,6 +143,7 @@ $("set").addEventListener("click", () =>
   guarded(async () => {
     if (!keyring) throw new Error("Open the keyring first");
     await keyring.set($("id").value, new TextEncoder().encode($("value").value));
+    await refreshKeys();
     show(`Stored "${$("id").value}". It is on disk, encrypted, before this line ran.`);
   }),
 );
@@ -95,6 +160,7 @@ $("delete").addEventListener("click", () =>
   guarded(async () => {
     if (!keyring) throw new Error("Open the keyring first");
     await keyring.delete($("id").value);
+    await refreshKeys();
     show(`Deleted "${$("id").value}".`);
   }),
 );
@@ -108,3 +174,6 @@ $("export").addEventListener("click", () =>
     show(`Copied ${image.length} encrypted bytes to the clipboard.`);
   }),
 );
+// Show what the origin already holds before anything is opened.
+await init();
+await guarded(refresh);

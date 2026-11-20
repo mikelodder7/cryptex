@@ -110,6 +110,26 @@ impl SnapshotStore {
         await_transaction(&tx).await
     }
 
+    /// Every keyring stored in this origin's IndexedDB, in name order.
+    ///
+    /// Reads without taking a lock, so it is safe to call while another tab
+    /// holds a keyring open.
+    pub async fn list_names() -> Result<Vec<String>> {
+        let db = open_db().await?;
+        let tx = db
+            .transaction_with_str_and_mode(STORE_NAME, IdbTransactionMode::Readonly)
+            .map_err(js_error)?;
+        let store = tx.object_store(STORE_NAME)?;
+        let keys = await_request(&store.get_all_keys()?).await?;
+        drop(tx);
+        let mut names: Vec<String> = js_sys::Array::from(&keys)
+            .iter()
+            .filter_map(|key| key.as_string())
+            .collect();
+        names.sort();
+        Ok(names)
+    }
+
     fn transaction(&self, mode: IdbTransactionMode) -> Result<IdbTransaction> {
         self.db
             .transaction_with_str_and_mode(STORE_NAME, mode)

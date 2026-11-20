@@ -351,6 +351,11 @@ impl MemoryKeyring {
         Ok(blob)
     }
 
+    /// Every id in the keyring, in order.
+    pub fn keys(&self) -> Vec<String> {
+        self.secrets.keys().cloned().collect()
+    }
+
     /// Re-encrypt under new connection parameters, optionally with a new cipher.
     ///
     /// The secrets stay in memory; only the key, salt and cipher change, so
@@ -445,6 +450,17 @@ mod tests {
         assert_eq!(reopened.get_secret("a").unwrap().as_slice(), b"one");
         reopened.set_secret("c", b"three").unwrap();
         assert_eq!(reopened.get_secret("c").unwrap().as_slice(), b"three");
+    }
+
+    #[test]
+    fn keys_lists_the_ids_in_order() {
+        let mut kr = MemoryKeyring::with_params(&password_params("")).unwrap();
+        assert!(kr.keys().is_empty());
+        kr.set_secret("b", b"two").unwrap();
+        kr.set_secret("a", b"one").unwrap();
+        assert_eq!(kr.keys(), ["a", "b"]);
+        kr.delete_secret("a").unwrap();
+        assert_eq!(kr.keys(), ["b"]);
     }
 
     #[test]

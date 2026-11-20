@@ -23,9 +23,9 @@ use std::task::{Context, Poll, Waker};
 use std::thread::{self, Thread};
 
 use super::file_common::{
-    CREATE_SECRETS_SQL, DELETE_SECRET_SQL, SELECT_SECRET_SQL, SecretStore, UPSERT_SECRET_SQL,
-    VERIFY_KEY_SQL, acquire_single_opener_lock, decode_secret, get_keyring_file, invalid_key,
-    sibling_path,
+    CREATE_SECRETS_SQL, DELETE_SECRET_SQL, SELECT_IDS_SQL, SELECT_SECRET_SQL, SecretStore,
+    UPSERT_SECRET_SQL, VERIFY_KEY_SQL, acquire_single_opener_lock, decode_secret, get_keyring_file,
+    invalid_key, sibling_path,
 };
 use crate::error::KeyRingError;
 use zeroize::Zeroizing;
@@ -144,6 +144,17 @@ impl TursoStore {
         let encoded = Zeroizing::new(hex::encode(secret));
         block_on(self.conn.execute(UPSERT_SECRET_SQL, [id, encoded.as_str()]))?;
         Ok(())
+    }
+
+    fn ids(&self) -> Result<Vec<String>> {
+        block_on::<_, Vec<String>, KeyRingError>(async {
+            let mut rows = self.conn.query(SELECT_IDS_SQL, ()).await?;
+            let mut ids = Vec::new();
+            while let Some(row) = rows.next().await? {
+                ids.push(row.get::<String>(0)?);
+            }
+            Ok(ids)
+        })
     }
 
     fn delete(&self, id: &str) -> Result<()> {
@@ -302,6 +313,13 @@ impl TursoFile {
             store,
             storage: Storage::File { db_path, _lock },
         })
+    }
+}
+
+impl TursoFile {
+    /// Every id in the keyring, in order.
+    pub(crate) fn ids(&self) -> Result<Vec<String>> {
+        self.store.ids()
     }
 }
 

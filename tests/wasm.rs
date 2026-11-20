@@ -59,6 +59,27 @@ async fn indexeddb_keeps_the_secrets() {
 }
 
 #[wasm_bindgen_test]
+async fn keys_and_keyring_names_are_listed() {
+    let name = unique_name("keys");
+    let mut keyring = Keyring::open(CONNECTION, &name, Default::default())
+        .await
+        .expect("a keyring opens");
+
+    keyring.set("b", b"two").await.expect("set succeeds");
+    keyring.set("a", b"one").await.expect("set succeeds");
+    assert_eq!(
+        keyring.keys().expect("keys succeeds"),
+        ["a".to_string(), "b".to_string()]
+    );
+
+    // A page can list what is stored without opening anything.
+    let stored = cryptex::stored_keyrings().await.expect("the store lists");
+    assert!(stored.contains(&name));
+
+    keyring.close().await.expect("close succeeds");
+}
+
+#[wasm_bindgen_test]
 async fn a_wrong_password_is_refused() {
     let name = unique_name("indexeddb");
     let mut keyring = Keyring::open(CONNECTION, &name, Default::default())
