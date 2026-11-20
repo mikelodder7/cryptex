@@ -32,6 +32,13 @@ pub mod macos;
 pub mod memory;
 #[cfg(any(feature = "encrypted-vfs", feature = "turso-encrypted-io"))]
 mod page_cipher;
+#[cfg(any(
+    feature = "encrypted-vfs",
+    feature = "turso",
+    feature = "turso-encrypted-io",
+    feature = "opfs"
+))]
+mod page_store;
 #[cfg(feature = "file")]
 pub mod sqlcipher;
 #[cfg(any(feature = "file", feature = "encrypted-vfs"))]
@@ -42,6 +49,8 @@ pub mod turso;
 mod turso_common;
 #[cfg(feature = "turso-encrypted-io")]
 pub mod turso_encrypted_io;
+#[cfg(feature = "turso")]
+mod turso_web;
 #[cfg(all(target_os = "windows", feature = "windows-credentials"))]
 pub mod windows;
 #[cfg(any(feature = "yubihsm-usb", feature = "yubihsm-http"))]

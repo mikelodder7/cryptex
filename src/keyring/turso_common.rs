@@ -231,6 +231,7 @@ impl TursoFile {
     /// Open through a caller-supplied [`Builder`], e.g. one carrying a custom
     /// Turso `IO`. No path is resolved and no lock file is created: the caller
     /// owns the storage.
+    #[cfg_attr(not(feature = "turso"), allow(dead_code))]
     pub(crate) fn open_with(builder: Builder) -> Result<Self> {
         Ok(Self {
             store: TursoStore::open(builder)?,
@@ -240,6 +241,7 @@ impl TursoFile {
 
     /// Adopt an already-open connection. The keyring creates and owns its
     /// `secrets` table and leaves every other table alone.
+    #[cfg_attr(not(feature = "turso"), allow(dead_code))]
     pub(crate) fn adopt(conn: Connection) -> Result<Self> {
         Ok(Self {
             store: TursoStore::adopt(conn)?,

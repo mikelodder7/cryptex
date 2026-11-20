@@ -16,6 +16,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 use super::file_common::{self, CipherParam, derive_key_32, file_keyring, secure_file};
 use super::turso_common::TursoFile;
+use super::turso_web::WebIo;
 use crate::error::KeyRingError;
 
 /// The cipher Turso uses to encrypt database pages.
@@ -88,6 +89,8 @@ pub use ::turso::core;
 ///   such as the Origin Private File System in a browser worker.
 pub struct TursoKeyring {
     file: TursoFile,
+    /// Set on keyrings whose database lives in memory, so it can be copied out.
+    web: Option<Arc<WebIo>>,
 }
 
 file_keyring!(TursoKeyring, file);
@@ -99,7 +102,7 @@ impl TursoKeyring {
         if let Some(db_path) = file.db_path() {
             secure_file(db_path)?;
         }
-        Ok(Self { file })
+        Ok(Self { file, web: None })
     }
 
     /// Adopt an already-open Turso connection.
@@ -128,6 +131,7 @@ impl TursoKeyring {
     pub fn from_connection(conn: Connection) -> Result<Self> {
         Ok(Self {
             file: TursoFile::adopt(conn)?,
+            web: None,
         })
     }
 
@@ -144,7 +148,47 @@ impl TursoKeyring {
     pub fn with_io(io: Arc<dyn core::IO>, path: &str, params: &ConnectionParams) -> Result<Self> {
         Ok(Self {
             file: TursoFile::open_with(builder(params)?(path).with_io_impl(io))?,
+            web: None,
         })
+    }
+
+    /// Open a keyring whose database lives in process memory.
+    ///
+    /// Nothing reaches the filesystem, so this works in a browser. Copy the
+    /// database out with [`export`](Self::export) to persist it and reopen
+    /// with [`from_bytes`](Self::from_bytes).
+    pub fn in_memory(params: &ConnectionParams) -> Result<Self> {
+        let io = WebIo::in_memory();
+        Self::open_web(Arc::clone(&io), "cryptex.db3", params).map(|k| Self { web: Some(io), ..k })
+    }
+
+    /// Reopen a keyring from an image produced by [`export`](Self::export).
+    pub fn from_bytes(bytes: &[u8], params: &ConnectionParams) -> Result<Self> {
+        let io = WebIo::restore(bytes)?;
+        Self::open_web(Arc::clone(&io), "cryptex.db3", params).map(|k| Self { web: Some(io), ..k })
+    }
+
+    fn open_web(io: Arc<WebIo>, path: &str, params: &ConnectionParams) -> Result<Self> {
+        let io: Arc<dyn core::IO> = io;
+        // The image was already parsed, so the only thing left that can refuse
+        // the open is the key: an image written under another key looks like a
+        // corrupt one. Report both the way [`MemoryKeyring::import`] does.
+        Self::with_io(io, path, params).map_err(|_| KeyRingError::AccessDenied {
+            msg: "Invalid key or corrupted keyring image".to_string(),
+        })
+    }
+
+    /// Copy the whole in-memory database into one encrypted blob.
+    ///
+    /// Fails for a keyring opened from a path or from a caller's connection:
+    /// the caller owns that storage, so it owns copying it.
+    pub fn export(&self) -> Result<Vec<u8>> {
+        self.web
+            .as_ref()
+            .ok_or_else(|| KeyRingError::GeneralError {
+                msg: "export is only available for an in-memory keyring".to_string(),
+            })?
+            .snapshot()
     }
 
     /// Re-encrypt the keyring with a new key (and optionally a different cipher).
@@ -157,7 +201,7 @@ impl TursoKeyring {
         if let Some(db_path) = file.db_path() {
             secure_file(db_path)?;
         }
-        Ok(Self { file })
+        Ok(Self { file, web: None })
     }
 }
 
@@ -226,6 +270,39 @@ mod tests {
         let raw = fs::read(dir.join("keyring-turso.db3")).unwrap();
         assert!(!raw.windows(9).any(|w| w == b"persisted"));
         assert!(!raw.windows(13).any(|w| w == b"SQLite format"));
+    }
+
+    #[test]
+    fn in_memory_round_trips_through_an_image() {
+        let p = params("password=in_memory salt=1qaz2wsx3edc4rfv5tgb");
+        let wrong = params("password=nope salt=1qaz2wsx3edc4rfv5tgb");
+
+        let image = {
+            let mut kr = TursoKeyring::in_memory(&p).unwrap();
+            kr.set_secret("k1", b"value1").unwrap();
+            kr.set_secret("shared", b"kept").unwrap();
+            let image = kr.export().unwrap();
+            assert!(!image.windows(6).any(|w| w == b"value1"));
+            image
+        };
+
+        let mut restored = TursoKeyring::from_bytes(&image, &p).unwrap();
+        assert_eq!(restored.get_secret("k1").unwrap().0, b"value1");
+        assert_eq!(restored.get_secret("shared").unwrap().0, b"kept");
+
+        assert!(matches!(
+            TursoKeyring::from_bytes(&image, &wrong),
+            Err(KeyRingError::AccessDenied { .. })
+        ));
+        assert!(TursoKeyring::from_bytes(b"not a snapshot", &p).is_err());
+    }
+
+    #[test]
+    fn export_needs_an_in_memory_keyring() {
+        let dir = TestDir::new(".test-turso-export");
+        let p = params("password=export_test salt=1qaz2wsx3edc4rfv5tgb");
+        let kr = TursoKeyring::with_params(&p, dir.keyring_dir()).unwrap();
+        assert!(kr.export().is_err());
     }
 
     #[test]

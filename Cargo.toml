@@ -56,7 +56,7 @@ js = [
     "dep:js-sys",
 ]
 encrypted-vfs = ["dep:argon2", "dep:dirs", "dep:rusqlite", "rusqlite/bundled", "dep:chacha20poly1305", "dep:aes-gcm", "dep:sqlite-plugin", "dep:getrandom"]
-turso = ["dep:argon2", "dep:dirs", "dep:turso", "dep:bindgen"]
+turso = ["dep:argon2", "dep:dirs", "dep:turso", "dep:bindgen", "dep:js-sys", "dep:wasm-bindgen"]
 turso-encrypted-io = ["dep:argon2", "dep:dirs", "dep:turso", "dep:bindgen", "dep:chacha20poly1305", "dep:aes-gcm", "dep:getrandom"]
 linux-secret-service = ["secret-service", "uzers"]
 macos-keychain = ["security-framework", "security-framework-sys", "core-foundation", "core-foundation-sys", "uzers"]
