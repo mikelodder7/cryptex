@@ -84,7 +84,8 @@ impl PageStore for MemPages {
     }
 
     fn read_exact_at(&mut self, offset: u64, buf: &mut [u8]) -> io::Result<()> {
-        let start = usize::try_from(offset).map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
+        let start =
+            usize::try_from(offset).map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
         let end = start
             .checked_add(buf.len())
             .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
@@ -101,7 +102,8 @@ impl PageStore for MemPages {
     }
 
     fn write_all_at(&mut self, offset: u64, buf: &[u8]) -> io::Result<()> {
-        let start = usize::try_from(offset).map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
+        let start =
+            usize::try_from(offset).map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
         let end = start
             .checked_add(buf.len())
             .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
@@ -122,4 +124,3 @@ impl PageStore for MemPages {
         Ok(())
     }
 }
-

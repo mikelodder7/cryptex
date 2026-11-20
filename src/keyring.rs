@@ -22,10 +22,10 @@ pub mod encrypted_vfs;
     feature = "turso-encrypted-io"
 ))]
 pub mod file_common;
-#[cfg(any(feature = "yubihsm-usb", feature = "yubihsm-http"))]
-pub mod kms;
 #[cfg(feature = "indexeddb")]
 pub mod indexeddb;
+#[cfg(any(feature = "yubihsm-usb", feature = "yubihsm-http"))]
+pub mod kms;
 #[cfg(all(target_os = "linux", feature = "linux-secret-service"))]
 pub mod linux;
 #[cfg(all(target_os = "macos", feature = "macos-keychain"))]
@@ -55,10 +55,10 @@ mod turso_common;
 pub mod turso_encrypted_io;
 #[cfg(feature = "turso")]
 mod turso_web;
-#[cfg(any(feature = "opfs", feature = "turso"))]
-mod web_time;
 #[cfg(feature = "web-storage")]
 pub mod web_storage;
+#[cfg(any(feature = "opfs", feature = "turso"))]
+mod web_time;
 #[cfg(all(target_os = "windows", feature = "windows-credentials"))]
 pub mod windows;
 #[cfg(any(feature = "yubihsm-usb", feature = "yubihsm-http"))]

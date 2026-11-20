@@ -18,14 +18,14 @@
 
 use super::page_store::{MemPages, PageStore};
 use super::web_time::WebClock;
+use crate::Result;
+use crate::error::KeyRingError;
 use ::turso::core::io::FileId;
 use ::turso::core::io::FileSyncType;
 use ::turso::core::{
     Buffer, Clock, Completion, File as TursoFileIo, IO, LimboError, MonotonicInstant, OpenFlags,
     WallClockInstant, io_error,
 };
-use crate::error::KeyRingError;
-use crate::Result;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -50,10 +50,7 @@ impl WebIo {
     /// The path of the database file in this IO, if it has one.
     pub(crate) fn db_path(&self) -> Option<String> {
         let files = self.files.lock().ok()?;
-        files
-            .keys()
-            .find(|path| path.ends_with(".db3"))
-            .cloned()
+        files.keys().find(|path| path.ends_with(".db3")).cloned()
     }
 
     /// Copy every file into one blob.

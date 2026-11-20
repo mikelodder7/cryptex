@@ -13,7 +13,7 @@ keywords = ["secrets", "vault", "keyring"]
 license = "MIT/Apache-2.0"
 repository = "https://github.com/mikelodder7/cryptex"
 readme = "README.md"
-version = "2.4.0"
+version = "2.5.0"
 
 # `all-features` is not used: the browser-only features (web-storage,
 # indexeddb, opfs, js) are rejected on non-wasm targets on purpose.

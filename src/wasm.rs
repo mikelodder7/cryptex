@@ -47,12 +47,12 @@ use js_sys::Reflect;
 use wasm_bindgen::prelude::*;
 use zeroize::Zeroizing;
 
+use crate::DynKeyRing;
 use crate::error::KeyRingError;
 use crate::indexeddb::SnapshotStore;
 use crate::memory::MemoryKeyring;
 use crate::turso::TursoKeyring;
 use crate::web_storage::{self, LocalStorageImage};
-use crate::DynKeyRing;
 
 /// A keyring, opened from JavaScript.
 #[wasm_bindgen]
@@ -116,8 +116,8 @@ impl Keyring {
         let options = Options::parse(options)?;
         match options.backend {
             Backend::Turso => {
-                let keyring = TursoKeyring::from_bytes(image, &turso_params(connection)?)
-                    .map_err(js)?;
+                let keyring =
+                    TursoKeyring::from_bytes(image, &turso_params(connection)?).map_err(js)?;
                 Ok(Keyring {
                     inner: Inner::Turso {
                         keyring: Some(keyring),
@@ -143,9 +143,7 @@ impl Keyring {
     /// Read a secret. Throws `ItemNotFound` when there is none.
     pub fn get(&mut self, id: &str) -> Result<Vec<u8>, JsError> {
         let secret = match &mut self.inner {
-            Inner::Turso { keyring, .. } => {
-                keyring.as_mut().ok_or_else(closed)?.get_secret(id)
-            }
+            Inner::Turso { keyring, .. } => keyring.as_mut().ok_or_else(closed)?.get_secret(id),
             Inner::Memory { keyring, .. } => keyring.get_secret(id),
         }
         .map_err(js)?;
@@ -354,7 +352,10 @@ async fn open_memory(connection: &str, name: &str, store: StoreKind) -> Result<K
             };
             (keyring, Store::LocalStorage(image))
         }
-        StoreKind::Memory => (MemoryKeyring::with_params(&params).map_err(js)?, Store::None),
+        StoreKind::Memory => (
+            MemoryKeyring::with_params(&params).map_err(js)?,
+            Store::None,
+        ),
         // Refused when the options are parsed; OPFS stores database files.
         StoreKind::Opfs => {
             return Err(JsError::new(
@@ -455,8 +456,8 @@ impl Options {
 }
 
 fn string_property(value: &JsValue, name: &str) -> Result<Option<String>, JsError> {
-    let property = Reflect::get(value, &JsValue::from_str(name))
-        .map_err(|e| js(KeyRingError::from(e)))?;
+    let property =
+        Reflect::get(value, &JsValue::from_str(name)).map_err(|e| js(KeyRingError::from(e)))?;
     if property.is_undefined() || property.is_null() {
         return Ok(None);
     }

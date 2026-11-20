@@ -34,6 +34,10 @@ pub use keyring::encrypted_vfs;
     )))
 )]
 pub use keyring::file_common;
+#[cfg(feature = "memory")]
+#[cfg_attr(docsrs, doc(cfg(feature = "memory")))]
+#[cfg(feature = "indexeddb")]
+pub use keyring::indexeddb;
 #[cfg(any(feature = "yubihsm-usb", feature = "yubihsm-http"))]
 #[cfg_attr(
     docsrs,
@@ -50,19 +54,12 @@ pub use keyring::linux;
 #[cfg_attr(docsrs, doc(cfg(all(target_os = "macos", feature = "macos-keychain"))))]
 pub use keyring::macos;
 #[cfg(feature = "memory")]
-#[cfg_attr(docsrs, doc(cfg(feature = "memory")))]
-#[cfg(feature = "indexeddb")]
-pub use keyring::indexeddb;
-#[cfg(feature = "memory")]
 pub use keyring::memory;
 #[cfg(feature = "web-storage")]
 pub use keyring::web_storage;
 
 #[cfg(feature = "js")]
 mod wasm;
-#[cfg(feature = "js")]
-#[cfg_attr(docsrs, doc(cfg(feature = "js")))]
-pub use wasm::{Keyring, request_persistent_storage};
 #[cfg(feature = "file")]
 #[cfg_attr(docsrs, doc(cfg(feature = "file")))]
 pub use keyring::sqlcipher;
@@ -85,6 +82,9 @@ pub use keyring::windows;
 )]
 pub use keyring::yubihsm;
 pub use keyring::*;
+#[cfg(feature = "js")]
+#[cfg_attr(docsrs, doc(cfg(feature = "js")))]
+pub use wasm::{Keyring, request_persistent_storage};
 
 #[cfg(any(
     all(target_os = "macos", feature = "macos-keychain"),

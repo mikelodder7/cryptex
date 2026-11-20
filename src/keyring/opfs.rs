@@ -32,10 +32,12 @@
 
 use super::page_store::PageStore;
 use super::web_time::WebClock;
-use ::turso::core::io::FileId;
-use ::turso::core::{Clock, File as TursoFileIo, LimboError, MonotonicInstant, WallClockInstant, io_error};
-use crate::error::KeyRingError;
 use crate::Result;
+use crate::error::KeyRingError;
+use ::turso::core::io::FileId;
+use ::turso::core::{
+    Clock, File as TursoFileIo, LimboError, MonotonicInstant, WallClockInstant, io_error,
+};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::io;
@@ -69,13 +71,12 @@ impl OpfsPages {
         let directory = open_directory().await?;
         let options = FileSystemGetFileOptions::new();
         options.set_create(true);
-        let handle: web_sys::FileSystemFileHandle = JsFuture::from(
-            directory.get_file_handle_with_options(name, &options),
-        )
-        .await
-        .map_err(js_error)?
-        .dyn_into()
-        .map_err(js_error)?;
+        let handle: web_sys::FileSystemFileHandle =
+            JsFuture::from(directory.get_file_handle_with_options(name, &options))
+                .await
+                .map_err(js_error)?
+                .dyn_into()
+                .map_err(js_error)?;
 
         let access: FileSystemSyncAccessHandle =
             JsFuture::from(handle.create_sync_access_handle())
@@ -194,7 +195,7 @@ impl OpfsIo {
         Ok(Self { files })
     }
 
-        /// Flush both files to disk and release their handles.
+    /// Flush both files to disk and release their handles.
     pub(crate) fn close(&mut self) {
         for file in self.files.values() {
             file.close();
@@ -354,9 +355,11 @@ impl TursoFileIo for OpfsFile {
 }
 
 async fn open_directory() -> Result<FileSystemDirectoryHandle> {
-    let navigator =
-        js_sys::Reflect::get(&js_sys::global(), &wasm_bindgen::JsValue::from_str("navigator"))
-            .map_err(js_error)?;
+    let navigator = js_sys::Reflect::get(
+        &js_sys::global(),
+        &wasm_bindgen::JsValue::from_str("navigator"),
+    )
+    .map_err(js_error)?;
     let storage = js_sys::Reflect::get(&navigator, &wasm_bindgen::JsValue::from_str("storage"))
         .map_err(js_error)?;
     if storage.is_undefined() {
@@ -364,13 +367,11 @@ async fn open_directory() -> Result<FileSystemDirectoryHandle> {
             "this browser has no Storage Manager API, so OPFS is unavailable",
         ));
     }
-    let get_directory = js_sys::Reflect::get(
-        &storage,
-        &wasm_bindgen::JsValue::from_str("getDirectory"),
-    )
-    .map_err(js_error)?
-    .dyn_into::<js_sys::Function>()
-    .map_err(js_error)?;
+    let get_directory =
+        js_sys::Reflect::get(&storage, &wasm_bindgen::JsValue::from_str("getDirectory"))
+            .map_err(js_error)?
+            .dyn_into::<js_sys::Function>()
+            .map_err(js_error)?;
     let root: FileSystemDirectoryHandle = JsFuture::from(
         get_directory
             .call0(&storage)
@@ -385,13 +386,11 @@ async fn open_directory() -> Result<FileSystemDirectoryHandle> {
 
     let options = FileSystemGetDirectoryOptions::new();
     options.set_create(true);
-    let directory = JsFuture::from(
-        root.get_directory_handle_with_options(DIRECTORY, &options),
-    )
-    .await
-    .map_err(js_error)?
-    .dyn_into()
-    .map_err(js_error)?;
+    let directory = JsFuture::from(root.get_directory_handle_with_options(DIRECTORY, &options))
+        .await
+        .map_err(js_error)?
+        .dyn_into()
+        .map_err(js_error)?;
     Ok(directory)
 }
 

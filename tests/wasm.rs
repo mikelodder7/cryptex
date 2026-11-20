@@ -7,7 +7,7 @@
 //! Run with `wasm-pack test --headless --chrome --no-default-features
 //! --features js`. Native `cargo test` skips this file.
 
-#![cfg(all(target_family = "wasm", target_os = "unknown"))]
+#![cfg(all(target_family = "wasm", target_os = "unknown", feature = "js"))]
 
 use cryptex::Keyring;
 use wasm_bindgen_test::wasm_bindgen_test;

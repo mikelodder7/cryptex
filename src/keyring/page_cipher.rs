@@ -167,7 +167,10 @@ pub(crate) fn logical_size<S: PageStore + ?Sized>(store: &S) -> io::Result<u64> 
 }
 
 /// Truncate an encrypted store to hold `logical_size` bytes (rounded up to a page).
-pub(crate) fn truncate<S: PageStore + ?Sized>(store: &mut S, logical_size: usize) -> io::Result<()> {
+pub(crate) fn truncate<S: PageStore + ?Sized>(
+    store: &mut S,
+    logical_size: usize,
+) -> io::Result<()> {
     let num_pages = logical_size.div_ceil(LOGICAL_PAGE_SIZE);
     store.set_len((num_pages * PHYSICAL_PAGE_SIZE) as u64)
 }
@@ -266,6 +269,9 @@ mod tests {
             truncate(&mut f, 1).unwrap();
             assert_eq!(logical_size(&f).unwrap(), LOGICAL_PAGE_SIZE as u64);
 
+            // Close the file before removing it, for Windows.
+            f.sync_all().unwrap();
+            #[allow(clippy::drop_non_drop)]
             drop(f);
             let _ = fs::remove_file(path);
         }

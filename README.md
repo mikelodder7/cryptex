@@ -187,6 +187,7 @@ await keyring.close();
 | `"turso"` (default) | `"indexeddb"` (default) | the encrypted database image, saved after every change |
 | `"turso"` | `"opfs"` | the database file itself, in the origin private file system |
 | `"turso"` | `"memory"` | nothing; `export()` the image yourself |
+| `"memory"` | `"indexeddb"` | the sealed image, saved after every change |
 | `"memory"` | `"localstorage"` | a sealed blob under `localStorage["cryptex:<name>"]` |
 | `"memory"` | `"memory"` | nothing |
 

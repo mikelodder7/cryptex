@@ -100,8 +100,19 @@ jobs:
           cargo clippy --target wasm32-unknown-unknown --no-default-features --features turso -- -D warnings
           cargo clippy --target wasm32-unknown-unknown --no-default-features --features "turso,turso-encrypted-io" -- -D warnings
           cargo clippy --target wasm32-unknown-unknown --no-default-features --features memory -- -D warnings
+          cargo clippy --target wasm32-unknown-unknown --no-default-features --features "turso,opfs,indexeddb,web-storage,js" -- -D warnings
           cargo check --target wasm32-wasip1 --no-default-features --features "turso,memory"
           cargo check --target wasm32-wasip2 --no-default-features --features "turso,memory"
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: Build the JavaScript package
+        run: wasm-pack build --target web --no-default-features --features js
+      - name: Set up Chrome and ChromeDriver
+        uses: browser-actions/setup-chrome@v1
+        with:
+          install-chromedriver: true
+      - name: Run the browser tests
+        run: wasm-pack test --headless --chrome --no-default-features --features js --test wasm
 
   rustfmt-linux:
     runs-on: ubuntu-latest

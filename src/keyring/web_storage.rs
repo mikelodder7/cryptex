@@ -32,10 +32,10 @@
 use super::cipher::CipherAlgorithm;
 use super::file_common;
 use super::memory::MemoryKeyring;
-use crate::error::KeyRingError;
-use wasm_bindgen::JsCast;
 use crate::KeyRingSecret;
+use crate::error::KeyRingError;
 use crate::{DynKeyRing, NewKeyRing, Result};
+use wasm_bindgen::JsCast;
 
 /// Connection parameters for [`WebStorageKeyring`].
 pub type ConnectionParams = file_common::ConnectionParams<CipherAlgorithm>;
@@ -195,12 +195,15 @@ pub async fn request_persistent_storage() -> Result<bool> {
     .ok_or_else(|| KeyRingError::GeneralError {
         msg: "this browser has no Storage Manager API".to_string(),
     })?;
-    let persist = js_sys::Reflect::get(&storage_manager, &wasm_bindgen::JsValue::from_str("persist"))
-        .map_err(js_error)?
-        .dyn_into::<js_sys::Function>()
-        .map_err(|_| KeyRingError::GeneralError {
-            msg: "this browser cannot persist storage".to_string(),
-        })?;
+    let persist = js_sys::Reflect::get(
+        &storage_manager,
+        &wasm_bindgen::JsValue::from_str("persist"),
+    )
+    .map_err(js_error)?
+    .dyn_into::<js_sys::Function>()
+    .map_err(|_| KeyRingError::GeneralError {
+        msg: "this browser cannot persist storage".to_string(),
+    })?;
     let granted = persist
         .call0(&storage_manager)
         .map_err(js_error)?

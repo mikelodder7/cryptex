@@ -32,8 +32,8 @@ use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{IdbDatabase, IdbFactory, IdbRequest, IdbTransaction, IdbTransactionMode};
 
-use crate::error::KeyRingError;
 use crate::Result;
+use crate::error::KeyRingError;
 
 /// Database holding every keyring image for this origin.
 const DB_NAME: &str = "cryptex";
@@ -79,7 +79,11 @@ impl SnapshotStore {
     /// Read the stored image, if there is one.
     pub async fn load(&self) -> Result<Option<Vec<u8>>> {
         let tx = self.transaction(IdbTransactionMode::Readonly)?;
-        let value = await_request(&tx.object_store(STORE_NAME)?.get(&JsValue::from_str(&self.name))?).await?;
+        let value = await_request(
+            &tx.object_store(STORE_NAME)?
+                .get(&JsValue::from_str(&self.name))?,
+        )
+        .await?;
         drop(tx);
         if value.is_undefined() || value.is_null() {
             Ok(None)
@@ -142,7 +146,8 @@ impl LockHold {
             .map_err(|_| unsupported("the Web Locks API is not callable"))?;
 
         let options = js_sys::Object::new();
-        Reflect::set(&options, &JsValue::from_str("ifAvailable"), &JsValue::TRUE).map_err(js_error)?;
+        Reflect::set(&options, &JsValue::from_str("ifAvailable"), &JsValue::TRUE)
+            .map_err(js_error)?;
 
         // `release` settles the promise the callback returns, ending the lock.
         let release: std::rc::Rc<std::cell::RefCell<Option<js_sys::Function>>> =
@@ -237,9 +242,7 @@ async fn open_db() -> Result<IdbDatabase> {
         .map_err(js_error)?
         .dyn_into()
         .map_err(|_| unsupported("this browser has no IndexedDB"))?;
-    let request = factory
-        .open_with_u32(DB_NAME, 1)
-        .map_err(js_error)?;
+    let request = factory.open_with_u32(DB_NAME, 1).map_err(js_error)?;
 
     // Create the object store the first time the database is opened.
     let upgrade_request = request.clone();
@@ -288,7 +291,12 @@ async fn await_request(request: &IdbRequest) -> Result<JsValue> {
             let request = request.clone();
             let reject = reject.clone();
             Closure::<dyn FnMut(JsValue)>::once_into_js(move |_event: JsValue| {
-                let err = request.error().ok().flatten().map(JsValue::from).unwrap_or(JsValue::NULL);
+                let err = request
+                    .error()
+                    .ok()
+                    .flatten()
+                    .map(JsValue::from)
+                    .unwrap_or(JsValue::NULL);
                 let _ = reject.call1(&JsValue::NULL, &err);
             })
         };
