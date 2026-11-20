@@ -19,6 +19,11 @@ function show(message) {
 function connection() {
   const password = $("password").value;
   if (!password) throw new Error("Enter a password first");
+  // The connection string is whitespace-separated, so a value cannot contain
+  // one; say so rather than passing the parser's byte offset to the user.
+  if (/\s/.test(password)) {
+    throw new Error("The password cannot contain spaces; the connection string is `password=<value> salt=<value>`");
+  }
   return `password=${password} salt=cryptex-browser-example`;
 }
 
@@ -50,7 +55,8 @@ $("open").addEventListener("click", () =>
         keyring.get(id);
         ids.push(id);
       } catch (error) {
-        if (!String(error).startsWith("ItemNotFound")) throw error;
+        // `String(error)` would prepend "Error: "; the kind is in `message`.
+        if (!error.message.startsWith("ItemNotFound")) throw error;
       }
     }
     if (ids.length) show(`Opened "${$("name").value}"; it holds ${ids.join(", ")}.`);
