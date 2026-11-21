@@ -327,7 +327,8 @@ jobs:
           toolchain: nightly
       - uses: cargo-bins/cargo-binstall@main
       - run: cargo binstall --no-confirm cargo-outdated
-      - run: cargo outdated --root-deps-only --exit-code=1
+      # bindgen must match sqlite-plugin's 0.72 to turn on its `runtime` feature.
+      - run: cargo outdated --root-deps-only --exit-code=1 --ignore bindgen
 
   pants:
     runs-on: ubuntu-latest

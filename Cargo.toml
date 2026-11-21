@@ -82,21 +82,21 @@ yubihsm-http = ["dep:yubihsm", "yubihsm/http", "yubihsm/passwords", "dep:aes-gcm
 
 [dependencies]
 aes-gcm = { version = "0.11", features = ["zeroize"], optional = true }
-argon2 = { version = "0.5", optional = true }
+argon2 = { version = "0.6", optional = true }
 chacha20poly1305 = { version = "0.11", features = ["zeroize"], optional = true }
 clap = "4.6.1"
 colored = "3.0"
-dirs = { version = "6.0", optional = true }
+dirs = { version = "7.0", optional = true }
 getrandom = { version = "0.4.3", optional = true }
 hex = "0.4"
 postcard = { version = "1", default-features = false, features = ["use-std"], optional = true }
-rusqlite = { version = "0.40.1", default-features = false, optional = true }
+rusqlite = { version = "0.43", default-features = false, optional = true }
 serde = { version = "1", optional = true }
 sha2 = { version = "0.11", optional = true }
-sqlite-plugin = { version = "0.10", optional = true }
+sqlite-plugin = { version = "0.11", optional = true }
 subtle = "2"
 # Pre-release pinned exactly: page encryption and custom IO are only exposed here.
-turso = { version = "=0.9.0-pre.1", default-features = false, optional = true }
+turso = { version = "=0.9.0-pre.6", default-features = false, optional = true }
 whoami = "2.1.2"
 yubihsm = { version = "0.42", default-features = false, optional = true }
 zeroize = { version = "1.9.0", features = ["zeroize_derive"] }
@@ -142,7 +142,7 @@ web-sys = { version = "0.3", optional = true, features = [
 # Turso's native page encryption on wasm must use its pure-Rust ciphers;
 # the native `aegis` build links C.
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies.turso]
-version = "=0.9.0-pre.1"
+version = "=0.9.0-pre.6"
 default-features = false
 features = ["pure-rust-crypto"]
 optional = true
