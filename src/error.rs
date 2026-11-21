@@ -123,6 +123,26 @@ impl From<rusqlite::Error> for KeyRingError {
     }
 }
 
+/// Browser APIs report failures as thrown JavaScript values.
+#[cfg(any(feature = "indexeddb", feature = "turso-opfs", feature = "web-storage"))]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(any(feature = "indexeddb", feature = "turso-opfs", feature = "web-storage")))
+)]
+impl From<wasm_bindgen::JsValue> for KeyRingError {
+    fn from(value: wasm_bindgen::JsValue) -> Self {
+        let detail = value
+            .as_string()
+            .or_else(|| {
+                js_sys::Reflect::get(&value, &wasm_bindgen::JsValue::from_str("message"))
+                    .ok()
+                    .and_then(|message| message.as_string())
+            })
+            .unwrap_or_else(|| format!("{value:?}"));
+        KeyRingError::GeneralError { msg: detail }
+    }
+}
+
 #[cfg(any(feature = "turso", feature = "turso-encrypted-io"))]
 #[cfg_attr(
     docsrs,

@@ -10,26 +10,77 @@ use argon2::{Algorithm, Argon2, Params as Argon2Params, Version};
 
 use crate::error::KeyRingError;
 #[cfg(any(
+    feature = "file",
+    feature = "encrypted-vfs",
+    feature = "turso",
+    feature = "turso-encrypted-io"
+))]
+use std::fs;
+#[cfg(any(
     feature = "encrypted-vfs",
     feature = "turso",
     feature = "turso-encrypted-io"
 ))]
 use std::fs::{File, OpenOptions, TryLockError};
+use std::iter;
+#[cfg(any(
+    feature = "file",
+    feature = "encrypted-vfs",
+    feature = "turso",
+    feature = "turso-encrypted-io"
+))]
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::{fs, iter};
 use zeroize::{Zeroize, Zeroizing};
 
+#[cfg(any(
+    feature = "file",
+    feature = "encrypted-vfs",
+    feature = "turso",
+    feature = "turso-encrypted-io"
+))]
 // SQL shared by every file-backed keyring. Numbered parameters and
 // `excluded.value` work with both SQLite and Turso.
 pub(crate) const VERIFY_KEY_SQL: &str = "SELECT COUNT(*) FROM sqlite_master";
+#[cfg(any(
+    feature = "file",
+    feature = "encrypted-vfs",
+    feature = "turso",
+    feature = "turso-encrypted-io"
+))]
 pub(crate) const CREATE_SECRETS_SQL: &str =
     "CREATE TABLE IF NOT EXISTS secrets (id TEXT UNIQUE NOT NULL, value TEXT NOT NULL)";
+#[cfg(any(
+    feature = "file",
+    feature = "encrypted-vfs",
+    feature = "turso",
+    feature = "turso-encrypted-io"
+))]
 pub(crate) const SELECT_SECRET_SQL: &str = "SELECT value FROM secrets WHERE id = ?1";
+#[cfg(any(
+    feature = "file",
+    feature = "encrypted-vfs",
+    feature = "turso",
+    feature = "turso-encrypted-io"
+))]
 pub(crate) const UPSERT_SECRET_SQL: &str = "INSERT INTO secrets(id, value) VALUES(?1, ?2) \
      ON CONFLICT(id) DO UPDATE SET value = excluded.value";
+#[cfg(any(
+    feature = "file",
+    feature = "encrypted-vfs",
+    feature = "turso",
+    feature = "turso-encrypted-io"
+))]
 pub(crate) const DELETE_SECRET_SQL: &str = "DELETE FROM secrets WHERE id = ?1";
+#[cfg(any(feature = "turso", feature = "turso-encrypted-io"))]
+pub(crate) const SELECT_IDS_SQL: &str = "SELECT id FROM secrets ORDER BY id";
 
+#[cfg(any(
+    feature = "file",
+    feature = "encrypted-vfs",
+    feature = "turso",
+    feature = "turso-encrypted-io"
+))]
 /// Storage behind a file-backed keyring. Secrets are stored hex-encoded.
 pub(crate) trait SecretStore {
     /// Fetch the secret stored under `id`.
@@ -40,6 +91,12 @@ pub(crate) trait SecretStore {
     fn delete(&self, id: &str) -> Result<()>;
 }
 
+#[cfg(any(
+    feature = "file",
+    feature = "encrypted-vfs",
+    feature = "turso",
+    feature = "turso-encrypted-io",
+))]
 /// Decode a stored hex value, or report [`KeyRingError::ItemNotFound`].
 pub(crate) fn decode_secret(value: Option<Zeroizing<String>>) -> Result<KeyRingSecret> {
     let value = value.ok_or(KeyRingError::ItemNotFound)?;
@@ -50,6 +107,12 @@ pub(crate) fn decode_secret(value: Option<Zeroizing<String>>) -> Result<KeyRingS
         })
 }
 
+#[cfg(any(
+    feature = "file",
+    feature = "encrypted-vfs",
+    feature = "turso",
+    feature = "turso-encrypted-io",
+))]
 /// The error for a database the derived key cannot read.
 pub(crate) fn invalid_key() -> KeyRingError {
     KeyRingError::AccessDenied {
@@ -60,6 +123,7 @@ pub(crate) fn invalid_key() -> KeyRingError {
 /// Implements [`DynKeyRing`] by delegating to the [`SecretStore`] in field
 /// `$store`, and [`NewKeyRing`] by parsing the calling module's
 /// `ConnectionParams` and calling `with_params(&params, None)`.
+#[allow(unused_macros)]
 macro_rules! file_keyring {
     ($keyring:ty, $store:ident) => {
         impl $crate::DynKeyRing for $keyring {
@@ -84,6 +148,14 @@ macro_rules! file_keyring {
         }
     };
 }
+// Only the backends that own a `SecretStore` use the macro.
+#[cfg(any(
+    feature = "file",
+    feature = "encrypted-vfs",
+    feature = "turso-encrypted-io",
+    feature = "yubihsm-usb",
+    feature = "yubihsm-http"
+))]
 pub(crate) use file_keyring;
 
 /// A cipher choice that can be set with `cipher=<name>` in a connection string.
@@ -110,7 +182,7 @@ impl CipherParam for NoCipher {
 /// similar to postgres.
 ///
 /// ```
-/// use cryptex::sqlcipher::ConnectionParams;
+/// use cryptex::file_common::ConnectionParams;
 ///
 /// let params = "password=1qaz2wsx3edc4rfv salt=0okm9ijn8uhb7ygv".parse::<ConnectionParams>().unwrap();
 /// ```
@@ -118,7 +190,7 @@ impl CipherParam for NoCipher {
 /// or with extra parameters. `memory` is Argon2's memory cost in KiB blocks.
 ///
 /// ```
-/// use cryptex::sqlcipher::ConnectionParams;
+/// use cryptex::file_common::ConnectionParams;
 ///
 /// let params = "password=1qaz2wsx3edc4rfv salt=0okm9ijn8uhb7ygv memory=32768 threads=3 parallel=2".parse::<ConnectionParams>().unwrap();
 /// ```
@@ -302,6 +374,7 @@ pub(crate) fn derive_key<C: CipherParam>(
 /// Derive a key with [`derive_key`] and require it to be exactly 32 bytes.
 #[cfg(any(
     feature = "encrypted-vfs",
+    feature = "memory",
     feature = "turso",
     feature = "turso-encrypted-io"
 ))]
@@ -319,11 +392,22 @@ pub(crate) fn derive_key_32<C: CipherParam>(
     Ok(out)
 }
 
+#[cfg(any(
+    feature = "file",
+    feature = "encrypted-vfs",
+    feature = "turso",
+    feature = "turso-encrypted-io",
+))]
 /// Resolve the keyring file `file_name` inside `in_path` (default
 /// `~/.cryptex`), creating and securing the directory.
 pub(crate) fn get_keyring_file(in_path: Option<PathBuf>, file_name: &str) -> Result<PathBuf> {
     let mut path = match in_path {
         None => {
+            // WASI has no home directory, and `CARGO_MANIFEST_DIR` is the
+            // build machine's path, so keep the keyring next to the program.
+            #[cfg(target_os = "wasi")]
+            let mut path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            #[cfg(not(target_os = "wasi"))]
             let mut path = dirs::home_dir().unwrap_or_else(|| {
                 dirs::document_dir().unwrap_or_else(|| {
                     dirs::data_local_dir()
@@ -415,6 +499,12 @@ pub(crate) fn acquire_single_opener_lock(db_path: &Path) -> Result<File> {
         Err(TryLockError::WouldBlock) => Err(KeyRingError::AccessDenied {
             msg: "keyring is already open by another process".to_string(),
         }),
+        // WASI does not implement locking at all, so a keyring there relies on
+        // the caller keeping a single writer. Everywhere else a filesystem
+        // that refuses to lock is an error: FUSE, NFS and SMB mounts report
+        // `Unsupported`, and opening unlocked would let two writers race.
+        #[cfg(target_os = "wasi")]
+        Err(TryLockError::Error(e)) if e.kind() == std::io::ErrorKind::Unsupported => Ok(file),
         Err(TryLockError::Error(e)) => Err(KeyRingError::GeneralError {
             msg: format!("unable to lock keyring: {}", e),
         }),
@@ -433,7 +523,15 @@ pub(crate) fn sibling_path(path: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(s)
 }
 
-#[cfg(unix)]
+#[cfg(all(
+    unix,
+    any(
+        feature = "file",
+        feature = "encrypted-vfs",
+        feature = "turso",
+        feature = "turso-encrypted-io"
+    )
+))]
 fn secure_dir(path: &Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
@@ -444,7 +542,15 @@ fn secure_dir(path: &Path) -> Result<()> {
     })
 }
 
-#[cfg(not(unix))]
+#[cfg(all(
+    not(unix),
+    any(
+        feature = "file",
+        feature = "encrypted-vfs",
+        feature = "turso",
+        feature = "turso-encrypted-io"
+    )
+))]
 fn secure_dir(_path: &Path) -> Result<()> {
     Ok(())
 }
@@ -467,7 +573,15 @@ pub(crate) fn secure_file(_path: &Path) -> Result<()> {
     Ok(())
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(
+    target_os = "windows",
+    any(
+        feature = "file",
+        feature = "encrypted-vfs",
+        feature = "turso",
+        feature = "turso-encrypted-io"
+    )
+))]
 fn make_hidden(path: &Path) {
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
@@ -491,7 +605,15 @@ fn make_hidden(path: &Path) {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(
+    not(target_os = "windows"),
+    any(
+        feature = "file",
+        feature = "encrypted-vfs",
+        feature = "turso",
+        feature = "turso-encrypted-io"
+    )
+))]
 fn make_hidden(_path: &Path) {}
 
 struct Parser<'a> {
@@ -507,8 +629,18 @@ impl<'a> Parser<'a> {
         };
 
         let mut connection_string = ConnectionParams::default();
+        // A repeated keyword used to overwrite the first one, so a password
+        // that contained ` salt=...` could silently swap the salt or turn the
+        // password into a raw key.
+        let mut seen: Vec<&'a str> = Vec::new();
 
         while let Some((key, value)) = parser.parameter()? {
+            if seen.contains(&key) {
+                return Err(KeyRingError::GeneralError {
+                    msg: format!("duplicate parameter: {}", key),
+                });
+            }
+            seen.push(key);
             connection_string.param(key, &value)?;
         }
         Ok(connection_string)
@@ -644,7 +776,15 @@ impl<'a> Parser<'a> {
 }
 
 /// Helpers shared by the file-backed keyring tests.
-#[cfg(test)]
+#[cfg(all(
+    test,
+    any(
+        feature = "file",
+        feature = "encrypted-vfs",
+        feature = "turso",
+        feature = "turso-encrypted-io"
+    )
+))]
 pub(crate) mod test_support {
     use std::ops::Deref;
     use std::path::{Path, PathBuf};
@@ -655,6 +795,11 @@ pub(crate) mod test_support {
 
     impl TestDir {
         pub(crate) fn new(name: &str) -> Self {
+            // Under WASI only the preopened directory is reachable, so use a
+            // path relative to it.
+            #[cfg(target_os = "wasi")]
+            let path = PathBuf::from(name);
+            #[cfg(not(target_os = "wasi"))]
             let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(name);
             let _ = std::fs::remove_dir_all(&path);
             Self(path)

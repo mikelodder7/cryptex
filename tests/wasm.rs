@@ -1,0 +1,189 @@
+/*
+    Copyright Michael Lodder. All Rights Reserved.
+    SPDX-License-Identifier: Apache-2.0
+*/
+//! Browser tests for the JavaScript bindings.
+//!
+//! Run with `wasm-pack test --headless --chrome --no-default-features
+//! --features js`. Native `cargo test` skips this file.
+
+#![cfg(all(target_family = "wasm", target_os = "unknown", feature = "js"))]
+
+use cryptex::Keyring;
+use wasm_bindgen_test::wasm_bindgen_test;
+
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+const CONNECTION: &str = "password=browser-test salt=0okm9ijn8uhb7ygv";
+
+/// A keyring name no other run uses, so a leftover store cannot fool a test.
+fn unique_name(prefix: &str) -> String {
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    format!("{prefix}-{}", NEXT.fetch_add(1, Ordering::Relaxed))
+}
+
+#[wasm_bindgen_test]
+async fn memory_keyring_round_trips() {
+    let mut keyring = Keyring::open(CONNECTION, &unique_name("memory"), Default::default())
+        .await
+        .expect("a memory keyring opens");
+
+    keyring.set("token", b"secret").await.expect("set succeeds");
+    assert_eq!(keyring.get("token").expect("get succeeds"), b"secret");
+    keyring.delete("token").await.expect("delete succeeds");
+    assert!(keyring.get("token").is_err());
+
+    keyring.close().await.expect("close succeeds");
+}
+
+#[wasm_bindgen_test]
+async fn a_closed_keyring_refuses_every_call() {
+    let mut keyring = Keyring::open(CONNECTION, &unique_name("closed"), Default::default())
+        .await
+        .expect("a memory keyring opens");
+    keyring.set("token", b"secret").await.expect("set succeeds");
+    keyring.close().await.expect("close succeeds");
+
+    let error = keyring
+        .set("token", b"other")
+        .await
+        .expect_err("a closed keyring refuses writes");
+    assert!(format!("{error:?}").contains("closed"), "{error:?}");
+    assert!(keyring.get("token").is_err());
+    assert!(keyring.delete("token").await.is_err());
+    assert!(keyring.keys().is_err());
+}
+
+#[wasm_bindgen_test]
+async fn local_storage_takes_one_opener() {
+    // Two tabs rewriting one image would lose each other's secrets, so the
+    // second opener is refused instead.
+    let name = unique_name("locked");
+    let options =
+        || js_sys::JSON::parse(r#"{"store":"localstorage"}"#).expect("the options are JSON");
+
+    let mut first = Keyring::open(CONNECTION, &name, options())
+        .await
+        .expect("the first opener gets the keyring");
+    let second = Keyring::open(CONNECTION, &name, options()).await;
+    assert!(second.is_err(), "a second opener must be refused");
+
+    // Closing releases the lock, so the name can be opened again.
+    first.close().await.expect("close succeeds");
+    let mut reopened = Keyring::open(CONNECTION, &name, options())
+        .await
+        .expect("closing releases the lock");
+    reopened.close().await.expect("close succeeds");
+}
+
+#[wasm_bindgen_test]
+async fn indexeddb_keeps_the_secrets() {
+    let name = unique_name("indexeddb");
+
+    let mut keyring = Keyring::open(CONNECTION, &name, Default::default())
+        .await
+        .expect("a keyring opens");
+    keyring.set("token", b"value").await.expect("set succeeds");
+    // A resolved set has reached the store, so the image is encrypted at rest.
+    let image = keyring.export().expect("export succeeds");
+    assert!(!image.windows(5).any(|w| w == b"value"));
+    keyring.close().await.expect("close succeeds");
+
+    let mut reopened = Keyring::open(CONNECTION, &name, Default::default())
+        .await
+        .expect("the keyring reopens");
+    assert_eq!(reopened.get("token").expect("get succeeds"), b"value");
+    reopened.close().await.expect("close succeeds");
+}
+
+#[wasm_bindgen_test]
+async fn keys_and_keyring_names_are_listed() {
+    let name = unique_name("keys");
+    let mut keyring = Keyring::open(CONNECTION, &name, Default::default())
+        .await
+        .expect("a keyring opens");
+
+    keyring.set("b", b"two").await.expect("set succeeds");
+    keyring.set("a", b"one").await.expect("set succeeds");
+    assert_eq!(
+        keyring.keys().expect("keys succeeds"),
+        ["a".to_string(), "b".to_string()]
+    );
+
+    // A page can list what is stored without opening anything.
+    let stored = cryptex::stored_keyrings(wasm_bindgen::JsValue::UNDEFINED)
+        .await
+        .expect("the store lists");
+    assert!(stored.contains(&name));
+
+    keyring.close().await.expect("close succeeds");
+}
+
+#[wasm_bindgen_test]
+async fn every_store_lists_its_keyrings() {
+    use wasm_bindgen::JsValue;
+
+    let indexeddb = cryptex::stored_keyrings(JsValue::UNDEFINED)
+        .await
+        .expect("IndexedDB lists");
+    assert!(indexeddb.is_sorted());
+
+    // localStorage is a page API, so this test also covers the page case.
+    let name = unique_name("localstorage");
+    let mut keyring = Keyring::open(
+        CONNECTION,
+        &name,
+        js_sys::JSON::parse(r#"{"backend":"turso","store":"localstorage"}"#)
+            .expect("the options are JSON"),
+    )
+    .await
+    .expect("a localStorage keyring opens");
+    keyring.set("token", b"value").await.expect("set succeeds");
+    keyring.close().await.expect("close succeeds");
+
+    let listed = cryptex::stored_keyrings(
+        js_sys::JSON::parse(r#"{"store":"localstorage"}"#).expect("the options are JSON"),
+    )
+    .await
+    .expect("localStorage lists");
+    assert!(listed.contains(&name), "{listed:?} lacks {name}");
+
+    // OPFS listing reads the directory, which works from a page even though
+    // opening an OPFS keyring needs a worker.
+    let opfs = cryptex::stored_keyrings(
+        js_sys::JSON::parse(r#"{"store":"opfs"}"#).expect("the options are JSON"),
+    )
+    .await
+    .expect("OPFS lists");
+    assert!(opfs.is_sorted());
+
+    let memory = cryptex::stored_keyrings(
+        js_sys::JSON::parse(r#"{"store":"memory"}"#).expect("the options are JSON"),
+    )
+    .await
+    .expect("memory lists");
+    assert!(memory.is_empty());
+}
+
+#[wasm_bindgen_test]
+async fn a_wrong_password_is_refused() {
+    let name = unique_name("indexeddb");
+    let mut keyring = Keyring::open(CONNECTION, &name, Default::default())
+        .await
+        .expect("a keyring opens");
+    keyring.set("token", b"value").await.expect("set succeeds");
+    keyring.close().await.expect("close succeeds");
+
+    let result = Keyring::open(
+        "password=wrong salt=0okm9ijn8uhb7ygv",
+        &name,
+        Default::default(),
+    )
+    .await;
+    match result {
+        Err(error) => assert!(format!("{error:?}").contains("AccessDenied")),
+        Ok(_) => panic!("the wrong password is refused"),
+    }
+}

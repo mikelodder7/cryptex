@@ -100,6 +100,183 @@ CRYPTEX_ARGON2_MEMORY=32768 CRYPTEX_ARGON2_THREADS=3 CRYPTEX_ARGON2_PARALLEL=2 c
 
 The program can be compiled from any OS to run on any OS. Cryptex-CLI is the command line tool while Cryptex is the library.
 
+### In-memory keyrings
+
+The `memory` feature adds `MemoryKeyring`, which keeps its secrets in RAM and
+never writes a file. It builds for every target, including wasm. Secrets leave
+memory only as a single AEAD-sealed blob:
+
+```rust
+use cryptex::KeyRing;
+use cryptex::memory::{ConnectionParams, MemoryKeyring};
+
+let params: ConnectionParams =
+    "password=<password> salt=<salt value>".parse().unwrap();
+let mut keyring = MemoryKeyring::with_params(&params)?;
+keyring.set_secret("token", b"secret value")?;
+
+// Persist this anywhere you like; it is sealed with a fresh nonce.
+let blob = keyring.export()?;
+// The salt, cipher and Argon2 parameters travel inside the blob.
+let mut reopened = MemoryKeyring::import(&blob, b"<password>")?;
+# Ok::<(), cryptex::KeyRingError>(())
+```
+
+A blob made from `key=<hex>` instead of a password needs that same raw key to
+open. `rekey` re-derives the key without touching the secrets.
+
+---
+
+## WebAssembly and WASI
+
+`cryptex` builds for `wasm32-unknown-unknown` and for `wasm32-wasip1` /
+`wasm32-wasip2`. Which backends exist there:
+
+| Feature | `wasm32-unknown-unknown` | WASI | Notes |
+|---------|--------------------------|------|-------|
+| `memory` | yes | yes | encrypted in RAM, export/import |
+| `turso` | yes | yes | Turso's native page encryption, including in-memory and OPFS keyrings |
+| `turso-encrypted-io` | builds | yes | the page cipher needs a `PageStore`; the file-backed one is native only |
+| `web-storage` | yes | no | a `MemoryKeyring` sealed into `localStorage` |
+| `indexeddb` | yes | no | encrypted image snapshots, one per keyring |
+| `turso-opfs` | yes | no | the database file itself in the origin private file system |
+| `js` | yes | no | the `wasm-bindgen` `Keyring` class |
+| `file`, `encrypted-vfs` | no | no | SQLCipher and the bundled C VFS are native only |
+| OS keyrings, `yubihsm-*` | no | no | no OS keychain or USB device |
+
+Asking for an unsupported backend on wasm is a compile error that names the
+problem, rather than a linker failure.
+
+`getrandom` needs its Web Crypto backend on `wasm32-unknown-unknown`. The
+repository's `.cargo/config.toml` sets it, and a CI job that overrides
+`RUSTFLAGS` must repeat it:
+
+```bash
+RUSTFLAGS='--cfg getrandom_backend="wasm_js"' \
+  cargo check --target wasm32-unknown-unknown --no-default-features --features turso
+```
+
+### Browser keyrings
+
+The `js` feature wraps the backends in a `Keyring` class for JavaScript:
+
+```bash
+wasm-pack build --target web --no-default-features --features js
+```
+
+```js
+import init, { Keyring, requestPersistentStorage } from "./pkg/cryptex.js";
+
+await init();
+
+// An encrypted Turso database, persisted in IndexedDB. These are the defaults.
+const keyring = await Keyring.open("password=hunter2 salt=0okm9ijn8uhb7ygv", "settings");
+await keyring.set("api-token", new TextEncoder().encode("s3cret"));
+const token = keyring.get("api-token"); // Uint8Array
+await keyring.delete("api-token");
+
+// Ask the browser not to evict the origin's storage.
+await requestPersistentStorage();
+await keyring.close();
+```
+
+`open(connection, name, options)` chooses where the keyring lives:
+
+| `backend` | `store` | What is persisted |
+|-----------|---------|-------------------|
+| `"turso"` (default) | `"indexeddb"` (default) | the encrypted database image, saved after every change |
+| `"turso"` | `"opfs"` | the database file itself, in the origin private file system |
+| `"turso"` | `"memory"` | nothing; `export()` the image yourself |
+| `"memory"` | `"indexeddb"` | the sealed image, saved after every change |
+| `"memory"` | `"localstorage"` | a sealed blob under `localStorage["cryptex:<name>"]` |
+| `"memory"` | `"memory"` | nothing |
+
+`import(connection, image, options)` reopens an image returned by `export()`,
+and `rekey(connection)` changes its password.
+
+`keyring.keys()` lists the ids inside an open keyring, and
+`storedKeyrings({ store })` lists the keyrings the origin already has in
+`"indexeddb"` (the default), `"localstorage"` or `"opfs"`, without opening
+anything. Listing OPFS works from a page; opening an OPFS keyring does not.
+
+Every store keeps the data encrypted; the key comes from the password (or raw
+key) in the connection string, so a store with the wrong connection string
+fails with `AccessDenied` instead of returning garbage.
+
+A `set` or `delete` that resolves has reached the store, and every call on a
+closed keyring throws. An IndexedDB or localStorage keyring also holds a Web
+Lock named after itself, so a second tab that opens the same name fails with
+`AccessDenied` instead of overwriting the first tab's secrets; `close()`
+releases the lock, and with OPFS the sync access handle, so close a keyring
+before opening it again in the same context. The Rust-level
+`WebStorageKeyring` does not take that lock: it is synchronous by design, and
+taking a lock is not.
+
+OPFS needs `createSyncAccessHandle()`, which browsers expose only in a
+dedicated worker, so `store: "opfs"` is refused on the main thread. A worker
+can use IndexedDB too. `examples/web/` has a page that uses IndexedDB and a
+worker that uses OPFS; serve it over HTTP (`python3 -m http.server`), because
+wasm modules and OPFS are not available on `file://` URLs.
+
+Errors are `Error` objects whose message starts with the kind, so a caller can
+switch on `ItemNotFound:`, `AccessDenied:`, `TypeError:` or `GeneralError:`
+without parsing the rest.
+
+Two costs are worth planning for. Any script the origin loads can read
+IndexedDB, OPFS and `localStorage`, so the encryption protects against other
+origins and other users, not against a compromised page.
+`requestPersistentStorage()` asks the browser to keep the data, but it may
+refuse, and clearing site data always removes it. Key derivation runs Argon2,
+which blocks the thread it runs on: with a large `memory=` value, open the
+keyring in a worker or the page freezes until it finishes.
+
+What the encryption does not detect is a *stale* image. Code that can write
+origin storage can put back an earlier one, or drop the `-wal` beside it, and
+the keyring opens with the secrets it held then; a rotated secret can come
+back that way. Keep a version or counter of your own outside the store if that
+matters.
+
+The password reaches the library through the connection string, which is a
+small DSL: `\` starts an escape, a leading `'` quotes a value, and whitespace
+separates entries. A password containing those characters is not passed
+through unchanged, so derive a key yourself or hex-encode the secret when the
+password is user-supplied. A repeated keyword (`password=a password=b`) is an
+error rather than a silent override. The examples use one fixed salt to stay
+readable; an application should give each keyring a salt of its own.
+
+### Bringing your own storage
+
+`TursoKeyring` can adopt a connection you opened, or open through an IO you
+supply, so one database can hold the keyring's `secrets` table and your own
+tables under a single key:
+
+```rust
+use cryptex::turso::TursoKeyring;
+
+// A connection opened by the caller, e.g. with a custom IO and encryption.
+let keyring = TursoKeyring::from_connection(conn)?;
+
+// Or let cryptex build the database through your IO (such as OPFS).
+let keyring = TursoKeyring::with_io(io, "keyring.db3", &params)?;
+# Ok::<(), cryptex::KeyRingError>(())
+```
+
+In both cases cryptex creates and owns only its own tables, and `rekey` reports
+an error because cryptex does not own that storage: copy the secrets into a
+keyring that owns its file instead. `cryptex::turso` re-exports `Connection`,
+`TursoBuilder` and `core` so callers construct matching types.
+
+Turso's synchronous API is driven on the current thread. Native builds park the
+thread while a future is pending; wasm builds poll a bounded number of times
+and return an error instead of spinning, so an IO backend must complete its
+reads in place.
+
+On WASI there is no file locking: `try_lock` reports `Unsupported`, which the
+keyring treats as success, and the default keyring directory is `./.cryptex`
+because there is no home directory. Keep a single writer per database there.
+
+The CLI is native only: a wasm binary prints that and exits.
+
 ---
 
 ## KMS/HSM Backends

@@ -5,9 +5,14 @@ use std::process::Command;
 #[test]
 fn default_argon2_params_are_checked_without_test_cfg() {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
+    // A separate target dir: the cdylib crate type leaves the rlib unhashed, so a
+    // nested build with fewer features would replace the one doctests link.
+    let target_dir = concat!(env!("CARGO_TARGET_TMPDIR"), "/default_argon2_params");
     let output = Command::new(cargo)
         .args([
             "run",
+            "--target-dir",
+            target_dir,
             "--quiet",
             "--example",
             "default_argon2_params",

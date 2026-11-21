@@ -1,5 +1,8 @@
 name: Cryptex CI
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: main
@@ -46,7 +49,7 @@ jobs:
       - name: Install native dependencies for encrypted-vfs and YubiHSM
         run: sudo apt-get install -y libclang-dev libusb-1.0-0-dev
       - run: cargo clippy --no-default-features --features encrypted-vfs -- -D warnings
-      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo clippy --all-targets --features "file,serde,encrypted-vfs,memory,turso,turso-encrypted-io,yubihsm-usb,yubihsm-http" -- -D warnings
 
   clippy-macos:
     runs-on: macos-latest
@@ -81,6 +84,39 @@ jobs:
       - run: cargo clippy --no-default-features --features file -- -D warnings
       - run: cargo clippy --no-default-features --features "windows-credentials,file" -- -D warnings
       - run: cargo clippy --no-default-features --features encrypted-vfs -- -D warnings
+
+  wasm:
+    runs-on: ubuntu-latest
+    env:
+      # The workflow-level RUSTFLAGS override the per-target flags in
+      # .cargo/config.toml, so the getrandom backend is repeated here.
+      RUSTFLAGS: '-D warnings --cfg getrandom_backend="wasm_js"'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          components: clippy
+          targets: wasm32-unknown-unknown,wasm32-wasip1,wasm32-wasip2
+      # WASI takes getrandom's WASI backend, so its checks drop the wasm_js cfg.
+      - name: Check browser and WASI backends
+        run: |
+          cargo clippy --target wasm32-unknown-unknown --no-default-features --features turso -- -D warnings
+          cargo clippy --target wasm32-unknown-unknown --no-default-features --features "turso,turso-encrypted-io" -- -D warnings
+          cargo clippy --target wasm32-unknown-unknown --no-default-features --features memory -- -D warnings
+          cargo clippy --target wasm32-unknown-unknown --no-default-features --features "turso,turso-opfs,indexeddb,web-storage,js" -- -D warnings
+          RUSTFLAGS="-D warnings" cargo check --target wasm32-wasip1 --no-default-features --features "turso,memory"
+          RUSTFLAGS="-D warnings" cargo check --target wasm32-wasip2 --no-default-features --features "turso,memory"
+      - name: Install wasm-pack
+        # Pinned and built from the registry: piping an unpinned installer
+        # script into a shell runs whatever that URL serves today.
+        run: cargo install wasm-pack --locked --version 0.13.1
+      - name: Build the JavaScript package
+        run: wasm-pack build --target web --no-default-features --features js
+      # The runner image ships Chrome with a matching ChromeDriver; a separately
+      # installed driver tracks a newer Chrome and refuses the image's browser.
+      - name: Run the browser tests
+        run: wasm-pack test --headless --chrome --chromedriver "$CHROMEWEBDRIVER/chromedriver" --no-default-features --features js --test wasm
 
   rustfmt-linux:
     runs-on: ubuntu-latest
@@ -123,7 +159,7 @@ jobs:
       - name: Install native dependencies for encrypted-vfs and YubiHSM
         run: sudo apt-get install -y libclang-dev libusb-1.0-0-dev
       - run: cargo doc --no-default-features --features encrypted-vfs
-      - run: cargo doc --no-deps --all-features
+      - run: cargo doc --no-deps --features "file,serde,encrypted-vfs,memory,turso,turso-encrypted-io,yubihsm-usb,yubihsm-http"
 
   doc-macos:
     runs-on: macos-latest
@@ -191,7 +227,7 @@ jobs:
         run: cargo test --test default_argon2_params --no-default-features --features "file,encrypted-vfs"
       - name: Test all features
         if: matrix.cache-key == 'encrypted-vfs'
-        run: cargo test --all-features
+        run: cargo test --features "file,serde,encrypted-vfs,memory,turso,turso-encrypted-io,yubihsm-usb,yubihsm-http"
 
   macos:
     runs-on: macos-latest
@@ -289,7 +325,8 @@ jobs:
           toolchain: nightly
       - uses: cargo-bins/cargo-binstall@main
       - run: cargo binstall --no-confirm cargo-outdated
-      - run: cargo outdated --root-deps-only --exit-code=1
+      # bindgen must match sqlite-plugin's 0.72 to turn on its `runtime` feature.
+      - run: cargo outdated --root-deps-only --exit-code=1 --ignore bindgen
 
   pants:
     runs-on: ubuntu-latest

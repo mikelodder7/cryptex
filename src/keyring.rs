@@ -3,6 +3,13 @@
     SPDX-License-Identifier: Apache-2.0
 */
 
+#[cfg(any(
+    feature = "encrypted-vfs",
+    feature = "memory",
+    feature = "turso-encrypted-io"
+))]
+mod cipher;
+
 mod keyringsecret;
 
 #[cfg(feature = "encrypted-vfs")]
@@ -10,18 +17,32 @@ pub mod encrypted_vfs;
 #[cfg(any(
     feature = "file",
     feature = "encrypted-vfs",
+    feature = "memory",
     feature = "turso",
     feature = "turso-encrypted-io"
 ))]
 pub mod file_common;
+#[cfg(feature = "indexeddb")]
+pub mod indexeddb;
 #[cfg(any(feature = "yubihsm-usb", feature = "yubihsm-http"))]
 pub mod kms;
 #[cfg(all(target_os = "linux", feature = "linux-secret-service"))]
 pub mod linux;
 #[cfg(all(target_os = "macos", feature = "macos-keychain"))]
 pub mod macos;
+#[cfg(feature = "memory")]
+pub mod memory;
+#[cfg(feature = "turso-opfs")]
+pub mod opfs;
 #[cfg(any(feature = "encrypted-vfs", feature = "turso-encrypted-io"))]
 mod page_cipher;
+#[cfg(any(
+    feature = "encrypted-vfs",
+    feature = "turso",
+    feature = "turso-encrypted-io",
+    feature = "turso-opfs"
+))]
+mod page_store;
 #[cfg(feature = "file")]
 pub mod sqlcipher;
 #[cfg(any(feature = "file", feature = "encrypted-vfs"))]
@@ -32,6 +53,12 @@ pub mod turso;
 mod turso_common;
 #[cfg(feature = "turso-encrypted-io")]
 pub mod turso_encrypted_io;
+#[cfg(feature = "turso")]
+mod turso_web;
+#[cfg(feature = "web-storage")]
+pub mod web_storage;
+#[cfg(any(feature = "turso-opfs", feature = "turso"))]
+mod web_time;
 #[cfg(all(target_os = "windows", feature = "windows-credentials"))]
 pub mod windows;
 #[cfg(any(feature = "yubihsm-usb", feature = "yubihsm-http"))]
@@ -99,12 +126,47 @@ pub fn get_os_keyring(service: &str) -> Result<OsKeyRing<'_>> {
     all(target_os = "linux", feature = "linux-secret-service"),
     feature = "file",
     feature = "encrypted-vfs",
+    feature = "memory",
     feature = "turso",
     feature = "turso-encrypted-io",
     feature = "yubihsm-usb",
     feature = "yubihsm-http",
 )))]
 compile_error!("no keyring implementation is selected or available for this platform");
+
+// Backends that need native OS APIs, C libraries or USB devices. They are
+// rejected on wasm targets so the build fails with a clear message instead of
+// a wall of linker errors.
+#[cfg(all(
+    target_family = "wasm",
+    any(
+        feature = "file",
+        feature = "encrypted-vfs",
+        feature = "yubihsm-usb",
+        feature = "yubihsm-http",
+        feature = "linux-secret-service",
+        feature = "macos-keychain",
+        feature = "windows-credentials",
+    )
+))]
+compile_error!(
+    "the file, encrypted-vfs, yubihsm and OS keyring backends are not available on wasm; \
+     use the memory, web-storage, indexeddb, turso-opfs or turso features instead"
+);
+
+// Browser-only features asked for by a non-browser target.
+#[cfg(all(
+    not(all(target_arch = "wasm32", target_os = "unknown")),
+    any(
+        feature = "web-storage",
+        feature = "indexeddb",
+        feature = "turso-opfs",
+        feature = "js"
+    )
+))]
+compile_error!(
+    "the web-storage, indexeddb, turso-opfs and js features require wasm32-unknown-unknown"
+);
 
 #[cfg(any(
     all(target_os = "linux", feature = "linux-secret-service"),
@@ -144,6 +206,7 @@ pub const fn allows_file() -> bool {
     any(
         feature = "file",
         feature = "encrypted-vfs",
+        feature = "memory",
         feature = "turso",
         feature = "turso-encrypted-io"
     )
@@ -158,6 +221,7 @@ pub const fn default_memory_cost() -> u32 {
     any(
         feature = "file",
         feature = "encrypted-vfs",
+        feature = "memory",
         feature = "turso",
         feature = "turso-encrypted-io"
     )
@@ -172,6 +236,7 @@ pub const fn default_memory_cost() -> u32 {
     any(
         feature = "file",
         feature = "encrypted-vfs",
+        feature = "memory",
         feature = "turso",
         feature = "turso-encrypted-io"
     )
@@ -186,6 +251,7 @@ pub const fn default_threads() -> u32 {
     any(
         feature = "file",
         feature = "encrypted-vfs",
+        feature = "memory",
         feature = "turso",
         feature = "turso-encrypted-io"
     )
@@ -200,6 +266,7 @@ pub const fn default_threads() -> u32 {
     any(
         feature = "file",
         feature = "encrypted-vfs",
+        feature = "memory",
         feature = "turso",
         feature = "turso-encrypted-io"
     )
@@ -214,6 +281,7 @@ pub const fn default_parallel() -> u32 {
     any(
         feature = "file",
         feature = "encrypted-vfs",
+        feature = "memory",
         feature = "turso",
         feature = "turso-encrypted-io"
     )
@@ -275,6 +343,7 @@ pub trait ListKeyRing {
     any(
         feature = "file",
         feature = "encrypted-vfs",
+        feature = "memory",
         feature = "turso",
         feature = "turso-encrypted-io"
     )

@@ -23,9 +23,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use super::file_common::{self, derive_key_32, file_keyring, private_open_options};
 use super::page_cipher::{self, ActiveCipher};
+use super::page_store::PageStore;
 use super::turso_common::TursoFile;
 
-pub use super::page_cipher::CipherAlgorithm;
+pub use super::cipher::CipherAlgorithm;
 
 /// Connection parameters for [`TursoEncryptedIoKeyring`].
 ///
@@ -112,14 +113,14 @@ impl TursoFileIo for EncryptedFile {
 
     fn pread(&self, pos: u64, c: Completion) -> TursoResult<Completion> {
         let mut file = self.file()?;
-        let available = page_cipher::logical_size(&file)
+        let available = page_cipher::logical_size(&*file)
             .map_err(|e| io_error(e, "pread"))?
             .saturating_sub(pos);
         let read = {
             let buf = c.as_read().buf().as_mut_slice();
             let n = buf.len().min(to_usize(available)?);
             self.cipher
-                .read_at(&mut file, to_usize(pos)?, &mut buf[..n])
+                .read_at(&mut *file, to_usize(pos)?, &mut buf[..n])
                 .map_err(|e| io_error(e, "pread"))?
         };
         c.complete(to_i32(read)?);
@@ -136,7 +137,7 @@ impl TursoFileIo for EncryptedFile {
     }
 
     fn sync(&self, c: Completion, _sync_type: FileSyncType) -> TursoResult<Completion> {
-        self.file()?.sync_all().map_err(|e| io_error(e, "sync"))?;
+        self.file()?.sync().map_err(|e| io_error(e, "sync"))?;
         c.complete(0);
         Ok(c)
     }
@@ -146,7 +147,7 @@ impl TursoFileIo for EncryptedFile {
     }
 
     fn truncate(&self, len: u64, c: Completion) -> TursoResult<Completion> {
-        page_cipher::truncate(&*self.file()?, to_usize(len)?)
+        page_cipher::truncate(&mut *self.file()?, to_usize(len)?)
             .map_err(|e| io_error(e, "truncate"))?;
         c.complete(0);
         Ok(c)

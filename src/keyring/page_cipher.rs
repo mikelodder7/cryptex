@@ -2,66 +2,30 @@
     Copyright Michael Lodder. All Rights Reserved.
     SPDX-License-Identifier: Apache-2.0
 */
-//! Page-level AEAD encryption shared by the SQLite encrypted VFS and the
-//! Turso encrypted IO backend.
+//! Page-level AEAD encryption shared by the SQLite encrypted VFS, the Turso
+//! encrypted IO backend and the browser page stores.
 //!
-//! Every 4096-byte logical page is stored on disk as
+//! Every 4096-byte logical page is stored as
 //! `[ciphertext(4096) | nonce(12) | tag(16)]`, with the page number bound as
-//! associated data so pages cannot be swapped.
+//! associated data so pages cannot be swapped. The byte layout is identical
+//! for every [`PageStore`], so a file written natively opens unchanged from
+//! OPFS and the other way round.
 
-use super::*;
+use super::cipher::CipherAlgorithm;
+use super::page_store::PageStore;
 use aes_gcm::Aes256Gcm;
 use chacha20poly1305::{
     ChaCha20Poly1305,
     aead::{Aead, KeyInit, Payload},
 };
-use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::io;
 use std::iter;
-use zeroize::Zeroize;
-
-use crate::error::KeyRingError;
 
 pub(crate) const LOGICAL_PAGE_SIZE: usize = 4096;
 const NONCE_SIZE: usize = 12;
 const TAG_SIZE: usize = 16;
 /// Physical block on disk = [ciphertext(4096) | nonce(12) | tag(16)]
 pub(crate) const PHYSICAL_PAGE_SIZE: usize = LOGICAL_PAGE_SIZE + NONCE_SIZE + TAG_SIZE; // 4124
-
-/// Selects the AEAD algorithm used for page encryption.
-///
-/// `Aes256Gcm` uses AES-NI hardware acceleration on x86/x86_64/AArch64 when
-/// available; on hardware without AES-NI it falls back to a constant-time
-/// software implementation that is slower than ChaCha20-Poly1305.
-#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
-pub enum CipherAlgorithm {
-    /// ChaCha20-Poly1305 (default)
-    #[default]
-    ChaCha20Poly1305,
-    /// AES-256-GCM
-    Aes256Gcm,
-}
-
-impl Zeroize for CipherAlgorithm {
-    fn zeroize(&mut self) {
-        *self = CipherAlgorithm::default();
-    }
-}
-
-impl file_common::CipherParam for CipherAlgorithm {
-    fn parse(value: &str) -> Result<Self> {
-        match value {
-            "chacha20poly1305" | "chacha20" => Ok(CipherAlgorithm::ChaCha20Poly1305),
-            "aes256gcm" | "aes" => Ok(CipherAlgorithm::Aes256Gcm),
-            other => Err(KeyRingError::GeneralError {
-                msg: format!(
-                    "unknown cipher '{}'; use chacha20poly1305 or aes256gcm",
-                    other
-                ),
-            }),
-        }
-    }
-}
 
 // Internal dispatch — one variant per algorithm.  Both use 12-byte nonces and
 // 16-byte tags so the physical page layout is identical regardless of choice.
@@ -142,27 +106,30 @@ impl ActiveCipher {
 
     /// Read and decrypt physical page `page_no`, or return zeros if it lies
     /// past the end of the file.
-    fn load_page(&self, file: &mut File, page_no: usize) -> io::Result<[u8; LOGICAL_PAGE_SIZE]> {
+    fn load_page<S: PageStore>(
+        &self,
+        store: &mut S,
+        page_no: usize,
+    ) -> io::Result<[u8; LOGICAL_PAGE_SIZE]> {
         let physical_offset = (page_no * PHYSICAL_PAGE_SIZE) as u64;
-        if physical_offset >= file.metadata()?.len() {
+        if physical_offset >= store.len()? {
             return Ok([0u8; LOGICAL_PAGE_SIZE]);
         }
         let mut block = [0u8; PHYSICAL_PAGE_SIZE];
-        file.seek(SeekFrom::Start(physical_offset))?;
-        file.read_exact(&mut block)?;
+        store.read_exact_at(physical_offset, &mut block)?;
         self.decrypt_page(page_no as u64, &block)
     }
 
     /// Read `data.len()` logical bytes starting at logical `offset`.
     /// Bytes past the end of the file read as zeros.
-    pub(crate) fn read_at(
+    pub(crate) fn read_at<S: PageStore>(
         &self,
-        file: &mut File,
+        store: &mut S,
         offset: usize,
         data: &mut [u8],
     ) -> io::Result<usize> {
         for chunk in page_chunks(offset, data.len()) {
-            let page = self.load_page(file, chunk.page_no)?;
+            let page = self.load_page(store, chunk.page_no)?;
             data[chunk.buf_pos..chunk.buf_pos + chunk.len]
                 .copy_from_slice(&page[chunk.intra..chunk.intra + chunk.len]);
         }
@@ -170,9 +137,9 @@ impl ActiveCipher {
     }
 
     /// Write `data` at logical `offset`, re-encrypting every touched page.
-    pub(crate) fn write_at(
+    pub(crate) fn write_at<S: PageStore>(
         &self,
-        file: &mut File,
+        store: &mut S,
         offset: usize,
         data: &[u8],
     ) -> io::Result<usize> {
@@ -180,29 +147,32 @@ impl ActiveCipher {
             let mut page = if chunk.len == LOGICAL_PAGE_SIZE {
                 [0u8; LOGICAL_PAGE_SIZE]
             } else {
-                self.load_page(file, chunk.page_no)?
+                self.load_page(store, chunk.page_no)?
             };
             page[chunk.intra..chunk.intra + chunk.len]
                 .copy_from_slice(&data[chunk.buf_pos..chunk.buf_pos + chunk.len]);
 
             let block = self.encrypt_page(chunk.page_no as u64, &page)?;
-            file.seek(SeekFrom::Start((chunk.page_no * PHYSICAL_PAGE_SIZE) as u64))?;
-            file.write_all(&block)?;
+            let physical_offset = (chunk.page_no * PHYSICAL_PAGE_SIZE) as u64;
+            store.write_all_at(physical_offset, &block)?;
         }
         Ok(data.len())
     }
 }
 
-/// Logical size of an encrypted file: whole physical pages × logical page size.
-pub(crate) fn logical_size(file: &File) -> io::Result<u64> {
-    let phys = file.metadata()?.len();
+/// Logical size of an encrypted store: whole physical pages × logical page size.
+pub(crate) fn logical_size<S: PageStore + ?Sized>(store: &S) -> io::Result<u64> {
+    let phys = store.len()?;
     Ok((phys / PHYSICAL_PAGE_SIZE as u64) * LOGICAL_PAGE_SIZE as u64)
 }
 
-/// Truncate an encrypted file to hold `logical_size` bytes (rounded up to a page).
-pub(crate) fn truncate(file: &File, logical_size: usize) -> io::Result<()> {
+/// Truncate an encrypted store to hold `logical_size` bytes (rounded up to a page).
+pub(crate) fn truncate<S: PageStore + ?Sized>(
+    store: &mut S,
+    logical_size: usize,
+) -> io::Result<()> {
     let num_pages = logical_size.div_ceil(LOGICAL_PAGE_SIZE);
-    file.set_len((num_pages * PHYSICAL_PAGE_SIZE) as u64)
+    store.set_len((num_pages * PHYSICAL_PAGE_SIZE) as u64)
 }
 
 /// The part of one logical page touched by a byte-range access.
@@ -240,6 +210,7 @@ fn page_chunks(offset: usize, len: usize) -> impl Iterator<Item = PageChunk> {
 mod tests {
     use super::*;
     use std::fs;
+    use std::fs::File;
     use std::path::PathBuf;
 
     fn temp_file(name: &str) -> (PathBuf, File) {
@@ -295,9 +266,12 @@ mod tests {
             let wrong = ActiveCipher::from_key(alg, &[8u8; 32]);
             assert!(wrong.read_at(&mut f, 0, &mut out).is_err());
 
-            truncate(&f, 1).unwrap();
+            truncate(&mut f, 1).unwrap();
             assert_eq!(logical_size(&f).unwrap(), LOGICAL_PAGE_SIZE as u64);
 
+            // Close the file before removing it, for Windows.
+            f.sync_all().unwrap();
+            #[allow(clippy::drop_non_drop)]
             drop(f);
             let _ = fs::remove_file(path);
         }
