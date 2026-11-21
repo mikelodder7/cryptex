@@ -142,7 +142,8 @@ impl Vfs for EncryptedVfs {
     }
 
     fn truncate(&self, handle: &mut Self::Handle, logical_size: usize) -> VfsResult<()> {
-        truncate(&handle.file, logical_size).map_err(|_| sqlite_plugin::vars::SQLITE_IOERR_TRUNCATE)
+        truncate(&mut handle.file, logical_size)
+            .map_err(|_| sqlite_plugin::vars::SQLITE_IOERR_TRUNCATE)
     }
 
     fn read(&self, handle: &mut Self::Handle, offset: usize, data: &mut [u8]) -> VfsResult<usize> {

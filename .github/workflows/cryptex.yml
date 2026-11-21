@@ -98,14 +98,15 @@ jobs:
           toolchain: stable
           components: clippy
           targets: wasm32-unknown-unknown,wasm32-wasip1,wasm32-wasip2
+      # WASI takes getrandom's WASI backend, so its checks drop the wasm_js cfg.
       - name: Check browser and WASI backends
         run: |
           cargo clippy --target wasm32-unknown-unknown --no-default-features --features turso -- -D warnings
           cargo clippy --target wasm32-unknown-unknown --no-default-features --features "turso,turso-encrypted-io" -- -D warnings
           cargo clippy --target wasm32-unknown-unknown --no-default-features --features memory -- -D warnings
           cargo clippy --target wasm32-unknown-unknown --no-default-features --features "turso,turso-opfs,indexeddb,web-storage,js" -- -D warnings
-          cargo check --target wasm32-wasip1 --no-default-features --features "turso,memory"
-          cargo check --target wasm32-wasip2 --no-default-features --features "turso,memory"
+          RUSTFLAGS="-D warnings" cargo check --target wasm32-wasip1 --no-default-features --features "turso,memory"
+          RUSTFLAGS="-D warnings" cargo check --target wasm32-wasip2 --no-default-features --features "turso,memory"
       - name: Install wasm-pack
         # Pinned and built from the registry: piping an unpinned installer
         # script into a shell runs whatever that URL serves today.
