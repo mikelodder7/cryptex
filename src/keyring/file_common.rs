@@ -182,7 +182,7 @@ impl CipherParam for NoCipher {
 /// similar to postgres.
 ///
 /// ```
-/// use cryptex::sqlcipher::ConnectionParams;
+/// use cryptex::file_common::ConnectionParams;
 ///
 /// let params = "password=1qaz2wsx3edc4rfv salt=0okm9ijn8uhb7ygv".parse::<ConnectionParams>().unwrap();
 /// ```
@@ -190,7 +190,7 @@ impl CipherParam for NoCipher {
 /// or with extra parameters. `memory` is Argon2's memory cost in KiB blocks.
 ///
 /// ```
-/// use cryptex::sqlcipher::ConnectionParams;
+/// use cryptex::file_common::ConnectionParams;
 ///
 /// let params = "password=1qaz2wsx3edc4rfv salt=0okm9ijn8uhb7ygv memory=32768 threads=3 parallel=2".parse::<ConnectionParams>().unwrap();
 /// ```

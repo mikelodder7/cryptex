@@ -113,12 +113,10 @@ jobs:
         run: cargo install wasm-pack --locked --version 0.13.1
       - name: Build the JavaScript package
         run: wasm-pack build --target web --no-default-features --features js
-      - name: Set up Chrome and ChromeDriver
-        uses: browser-actions/setup-chrome@v1
-        with:
-          install-chromedriver: true
+      # The runner image ships Chrome with a matching ChromeDriver; a separately
+      # installed driver tracks a newer Chrome and refuses the image's browser.
       - name: Run the browser tests
-        run: wasm-pack test --headless --chrome --no-default-features --features js --test wasm
+        run: wasm-pack test --headless --chrome --chromedriver "$CHROMEWEBDRIVER/chromedriver" --no-default-features --features js --test wasm
 
   rustfmt-linux:
     runs-on: ubuntu-latest

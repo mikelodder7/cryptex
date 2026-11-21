@@ -256,8 +256,8 @@ unsafe fn get_credentials(
 
         let secret = unsafe { std::slice::from_raw_parts(blob, blob_len) };
         let mut secret_u16 = vec![0u16; blob_len / 2];
-        for (i, chunk) in secret.chunks_exact(2).enumerate() {
-            secret_u16[i] = u16::from_le_bytes([chunk[0], chunk[1]]);
+        for (i, chunk) in secret.as_chunks::<2>().0.iter().enumerate() {
+            secret_u16[i] = u16::from_le_bytes(*chunk);
         }
         let t = match String::from_utf16(secret_u16.as_slice()).map(|pass| pass.to_string()) {
             Ok(s) => s,
